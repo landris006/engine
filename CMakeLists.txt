@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(engine)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Dependencies
@@ -35,3 +35,7 @@ target_link_libraries(engine PRIVATE
     imgui
     ${SLANG_LIB}
 )
+
+target_compile_definitions(engine PRIVATE
+      $<$<CONFIG:Debug>:DEBUG>
+  )

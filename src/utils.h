@@ -8,7 +8,7 @@ static void glfw_error_callback(int error, const char* description) {
   fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
-static void vk_check(VkResult err) {
+static auto vk_check(VkResult err) -> void {
   if (err == VK_SUCCESS) {
     return;
   }
