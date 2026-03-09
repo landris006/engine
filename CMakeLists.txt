@@ -8,6 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Vulkan REQUIRED)
 find_package(glfw3 REQUIRED)
 
+find_package(glm REQUIRED)
+
 find_library(SLANG_LIB slang)
 find_path(SLANG_INCLUDE_DIR slang.h PATH_SUFFIXES slang)
 
@@ -27,15 +29,17 @@ target_link_libraries(imgui PRIVATE Vulkan::Vulkan glfw)
 # Main Executable
 add_executable(engine src/main.cpp)
 
-target_include_directories(engine PRIVATE src ${SLANG_INCLUDE_DIR})
+target_include_directories(engine PRIVATE src external ${SLANG_INCLUDE_DIR})
 
 target_link_libraries(engine PRIVATE
     Vulkan::Vulkan
     glfw
     imgui
+    glm::glm
     ${SLANG_LIB}
 )
 
 target_compile_definitions(engine PRIVATE
-      $<$<CONFIG:Debug>:DEBUG>
-  )
+  $<$<CONFIG:Debug>:DEBUG>
+  VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
+)

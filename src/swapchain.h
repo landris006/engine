@@ -1,19 +1,27 @@
 #pragma once
 
+#include <vulkan/vulkan.hpp>
+
 #include "context.h"
 
-#include <vulkan/vulkan.hpp>
+static constexpr int FRAMES_IN_FLIGHT = 2;
 
 struct Swapchain {
   vk::UniqueSurfaceKHR surface;
-  vk::UniqueSwapchainKHR swapchain;
+  vk::UniqueSwapchainKHR handle;
   std::vector<vk::Image> images;
   std::vector<vk::UniqueImageView> image_views;
   vk::Format format;
   vk::Extent2D extent;
+  std::vector<vk::UniqueSemaphore> image_available;
+  std::vector<vk::UniqueSemaphore> render_finished;
+  std::vector<vk::UniqueFence> in_flight;
+  std::vector<vk::UniqueCommandBuffer> command_buffers;
 };
 
-static auto createSwapchain(Context& ctx, GLFWwindow* window) -> Swapchain {
+static auto createSwapchain(GLFWwindow* window, const Context& ctx,
+                            const vk::UniqueCommandPool& cmd_pool)
+    -> Swapchain {
   VkSurfaceKHR raw_surface;
   glfwCreateWindowSurface(ctx.instance.get(), window, nullptr, &raw_surface);
   auto surface = vk::UniqueSurfaceKHR(raw_surface, ctx.instance.get());
@@ -70,7 +78,10 @@ static auto createSwapchain(Context& ctx, GLFWwindow* window) -> Swapchain {
 
   auto images = ctx.device->getSwapchainImagesKHR(swapchain.get());
   auto image_views = std::vector<vk::UniqueImageView>();
-  for (const auto& image : images) {
+
+  auto render_finished_semaphores =
+      std::vector<vk::UniqueSemaphore>(images.size());
+  for (const auto& [i, image] : images | std::views::enumerate) {
     auto image_view = ctx.device->createImageViewUnique(
         vk::ImageViewCreateInfo()
             .setImage(image)
@@ -89,14 +100,39 @@ static auto createSwapchain(Context& ctx, GLFWwindow* window) -> Swapchain {
                     .setBaseArrayLayer(0)
                     .setLayerCount(1)));
     image_views.push_back(std::move(image_view));
+
+    render_finished_semaphores[i] =
+        ctx.device->createSemaphoreUnique(vk::SemaphoreCreateInfo());
   }
+
+  auto image_available_semaphores =
+      std::vector<vk::UniqueSemaphore>(FRAMES_IN_FLIGHT);
+  auto in_flight_fences = std::vector<vk::UniqueFence>(FRAMES_IN_FLIGHT);
+  auto command_buffers = std::vector<vk::UniqueCommandBuffer>(FRAMES_IN_FLIGHT);
+
+  for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+    image_available_semaphores[i] =
+        ctx.device->createSemaphoreUnique(vk::SemaphoreCreateInfo());
+    in_flight_fences[i] = ctx.device->createFenceUnique(
+        vk::FenceCreateInfo().setFlags(vk::FenceCreateFlagBits::eSignaled));
+  }
+
+  command_buffers = ctx.device->allocateCommandBuffersUnique(
+      vk::CommandBufferAllocateInfo()
+          .setCommandPool(cmd_pool.get())
+          .setLevel(vk::CommandBufferLevel::ePrimary)
+          .setCommandBufferCount(FRAMES_IN_FLIGHT));
 
   return Swapchain{
       .surface = std::move(surface),
-      .swapchain = std::move(swapchain),
+      .handle = std::move(swapchain),
       .images = std::move(images),
       .image_views = std::move(image_views),
       .format = selected_format.format,
       .extent = extent,
+      .image_available = std::move(image_available_semaphores),
+      .render_finished = std::move(render_finished_semaphores),
+      .in_flight = std::move(in_flight_fences),
+      .command_buffers = std::move(command_buffers),
   };
 }
