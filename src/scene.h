@@ -44,7 +44,7 @@ struct Scene {
 
   AllocatedBuffer tlas_buffer;
   AllocatedBuffer tlas_instance_buffer;
-  // vk::UniqueAccelerationStructureKHR tlas;
+  vk::UniqueAccelerationStructureKHR tlas_handle;
 };
 
 struct VertexHash {
@@ -203,6 +203,82 @@ static auto create_scene(const Context& ctx) -> Scene {
     meshes[i].blas_buffer = std::move(blas_buffer);
   }
 
+  auto instances =
+      std::vector<vk::AccelerationStructureInstanceKHR>(meshes.size());
+  for (const auto& [i, mesh] : meshes | std::views::enumerate) {
+    vk::TransformMatrixKHR identity{};
+    identity.matrix[0][0] = 1.f;
+    identity.matrix[1][1] = 1.f;
+    identity.matrix[2][2] = 1.f;
+
+    auto blas_addr =
+        ctx.device->getAccelerationStructureAddressKHR(mesh.blas_handle.get());
+
+    instances[i]
+        .setTransform(identity)
+        .setInstanceCustomIndex(i)
+        .setMask(0xFF)
+        .setInstanceShaderBindingTableRecordOffset(0)
+        .setFlags(vk::GeometryInstanceFlagBitsKHR::eTriangleFacingCullDisable)
+        .setAccelerationStructureReference(blas_addr);
+  }
+
+  auto tlas_instance_buffer = createBuffer(
+      ctx, instances.size() * sizeof(vk::AccelerationStructureInstanceKHR),
+      vk::BufferUsageFlagBits::eShaderDeviceAddress |
+          vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR,
+      vk::MemoryPropertyFlagBits::eHostVisible |
+          vk::MemoryPropertyFlagBits::eHostCoherent);
+  uploadToBuffer(
+      ctx, tlas_instance_buffer, instances.data(),
+      instances.size() * sizeof(vk::AccelerationStructureInstanceKHR));
+
+  vk::AccelerationStructureGeometryInstancesDataKHR instances_data{};
+  instances_data.data.setDeviceAddress(tlas_instance_buffer.address);
+
+  auto tlas_geom = vk::AccelerationStructureGeometryKHR{}
+                       .setGeometryType(vk::GeometryTypeKHR::eInstances)
+                       .setGeometry(instances_data);
+
+  uint32_t instance_count = instances.size();
+  auto tlas_build_info =
+      vk::AccelerationStructureBuildGeometryInfoKHR{}
+          .setType(vk::AccelerationStructureTypeKHR::eTopLevel)
+          .setFlags(vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace)
+          .setGeometries(tlas_geom);
+
+  auto tlas_sizes = ctx.device->getAccelerationStructureBuildSizesKHR(
+      vk::AccelerationStructureBuildTypeKHR::eDevice, tlas_build_info,
+      instance_count);
+
+  auto tlas_buffer =
+      createBuffer(ctx, tlas_sizes.accelerationStructureSize,
+                   vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR |
+                       vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                   vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+  auto tlas_handle = ctx.device->createAccelerationStructureKHRUnique(
+      vk::AccelerationStructureCreateInfoKHR{}
+          .setType(vk::AccelerationStructureTypeKHR::eTopLevel)
+          .setSize(tlas_sizes.accelerationStructureSize)
+          .setBuffer(tlas_buffer.handle.get()));
+
+  auto tlas_scratch =
+      createBuffer(ctx, tlas_sizes.buildScratchSize,
+                   vk::BufferUsageFlagBits::eStorageBuffer |
+                       vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                   vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+  tlas_build_info.setDstAccelerationStructure(tlas_handle.get());
+  tlas_build_info.scratchData.setDeviceAddress(tlas_scratch.address);
+
+  auto tlas_range =
+      vk::AccelerationStructureBuildRangeInfoKHR{}.setPrimitiveCount(
+          instance_count);
+  submitOneTimeCommand(ctx, [&](vk::CommandBuffer cmd) {
+    cmd.buildAccelerationStructuresKHR(tlas_build_info, &tlas_range);
+  });
+
   auto mesh_info_buffer =
       createBuffer(ctx, mesh_info.size() * sizeof(MeshInfo),
                    vk::BufferUsageFlagBits::eStorageBuffer |
@@ -238,6 +314,8 @@ static auto create_scene(const Context& ctx) -> Scene {
       .meshes = std::move(meshes),
       .mesh_info_buffer = std::move(mesh_info_buffer),
       .material_buffer = std::move(material_buffer),
-      // ...
+      .tlas_buffer = std::move(tlas_buffer),
+      .tlas_instance_buffer = std::move(tlas_instance_buffer),
+      .tlas_handle = std::move(tlas_handle),
   };
 };
