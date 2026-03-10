@@ -104,17 +104,23 @@ static auto createContext() -> Context {
                                .setQueuePriorities(priority);
 
   auto bda_features =
-      vk::PhysicalDeviceBufferDeviceAddressFeatures{}.setBufferDeviceAddress(
+      vk::PhysicalDeviceBufferDeviceAddressFeatures().setBufferDeviceAddress(
           true);
-  auto as_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR{}
+  auto scalar_features = vk::PhysicalDeviceScalarBlockLayoutFeatures()
+                             .setScalarBlockLayout(true)
+                             .setPNext(&bda_features);
+  auto as_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR()
                          .setAccelerationStructure(true)
-                         .setPNext(&bda_features);
-  auto rt_features = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR{}
+                         .setPNext(&scalar_features);
+  auto rt_features = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR()
                          .setRayTracingPipeline(true)
                          .setPNext(&as_features);
 
+  auto features = vk::PhysicalDeviceFeatures().setShaderInt64(true);
+
   auto device = selected_device.createDeviceUnique(
-      vk::DeviceCreateInfo{}
+      vk::DeviceCreateInfo()
+          .setPEnabledFeatures(&features)
           .setQueueCreateInfos(queue_create_info)
           .setPEnabledExtensionNames(extensions)
           .setPNext(&rt_features));
@@ -267,7 +273,10 @@ static auto createBuffer(const Context& context, vk::DeviceSize size,
 
   context.device->bindBufferMemory(buffer.get(), memory.get(), 0);
 
-  auto address = context.device->getBufferAddress(buffer.get());
+  vk::DeviceAddress address = 0;
+  if (usage & vk::BufferUsageFlagBits::eShaderDeviceAddress) {
+    address = context.device->getBufferAddress(buffer.get());
+  }
 
   return AllocatedBuffer{
       .handle = std::move(buffer),

@@ -37,7 +37,9 @@ static auto compile_slang(const Context& ctx, const char* file,
 
   slang::TargetDesc target_desc{
       .format = SLANG_SPIRV,
-      .profile = global_session->findProfile("spirv_1_5")};
+      .profile = global_session->findProfile("spirv_1_5"),
+      .forceGLSLScalarBufferLayout = true,
+  };
 
   const char* search_paths[] = {"shaders"};
 
