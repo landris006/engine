@@ -50,8 +50,8 @@ int main() {
     // init_info.Device = context.device.get();
     // ...
     // ImGui_ImplVulkan_Init(&init_info, render_pass.get());
-    auto rt_pipeline = createRtPipeline(context, swapchain.extent);
     auto scene = create_scene(context);
+    auto rt_pipeline = create_rt_pipeline(context, swapchain.extent, scene);
 
     uint32_t current_frame = 0;
     while (!glfwWindowShouldClose(window)) {

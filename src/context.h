@@ -213,7 +213,7 @@ static auto createImage(const ::Context& context, vk::Extent3D extent,
   };
 }
 
-static auto submitOneTimeCommand(
+static auto submit_one_time_command(
     const Context& context, std::function<void(const vk::CommandBuffer&)> cb) {
   auto cmd_buf = context.device->allocateCommandBuffersUnique(
       vk::CommandBufferAllocateInfo()

@@ -39,6 +39,8 @@ target_link_libraries(engine PRIVATE
     ${SLANG_LIB}
 )
 
+target_compile_options(engine PRIVATE -Wmissing-field-initializers)
+
 target_compile_definitions(engine PRIVATE
   $<$<CONFIG:Debug>:DEBUG>
   VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1

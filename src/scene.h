@@ -27,7 +27,7 @@ struct MeshInfo {
   vk::DeviceAddress vertex_address;
   vk::DeviceAddress index_address;
   uint32_t material_index;
-  uint32_t _pad;
+  uint32_t _pad = {};
 };
 
 struct Mesh {
@@ -110,7 +110,7 @@ static auto create_blas(const Context& ctx, const Mesh& mesh,
   auto range_info =
       vk::AccelerationStructureBuildRangeInfoKHR().setPrimitiveCount(
           primitve_count);
-  submitOneTimeCommand(ctx, [&](vk::CommandBuffer cmd) {
+  submit_one_time_command(ctx, [&](vk::CommandBuffer cmd) {
     cmd.buildAccelerationStructuresKHR(build_info, &range_info);
   });
 
@@ -187,10 +187,11 @@ static auto create_scene(const Context& ctx) -> Scene {
     uploadToBuffer(ctx, index_buffer, indices.data(),
                    indices.size() * sizeof(uint32_t));
 
-    meshes[i] = Mesh{
-        .vertex_buffer = std::move(vertex_buffer),
-        .index_buffer = std::move(index_buffer),
-    };
+    //
+    meshes[i] = Mesh{.vertex_buffer = std::move(vertex_buffer),
+                     .index_buffer = std::move(index_buffer),
+                     .blas_handle = {},
+                     .blas_buffer = {}};
     mesh_info[i] = MeshInfo{
         .vertex_address = meshes[i].vertex_buffer.address,
         .index_address = meshes[i].index_buffer.address,
@@ -275,7 +276,7 @@ static auto create_scene(const Context& ctx) -> Scene {
   auto tlas_range =
       vk::AccelerationStructureBuildRangeInfoKHR{}.setPrimitiveCount(
           instance_count);
-  submitOneTimeCommand(ctx, [&](vk::CommandBuffer cmd) {
+  submit_one_time_command(ctx, [&](vk::CommandBuffer cmd) {
     cmd.buildAccelerationStructuresKHR(tlas_build_info, &tlas_range);
   });
 
