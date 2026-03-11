@@ -36,6 +36,7 @@ int main() {
   }
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+  glfwWindowHintString(GLFW_WAYLAND_APP_ID, "super_engine");
   GLFWwindow* window = glfwCreateWindow(1280, 800, "Hello", nullptr, nullptr);
 
   {
