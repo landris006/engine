@@ -98,26 +98,47 @@ static auto create_rt_pipeline(const Context& context,
   auto image = createImage(
       context, vk::Extent3D(extent.width, extent.height, 1),
       vk::Format::eR32G32B32A32Sfloat,
-      vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc);
+      vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc |
+          vk::ImageUsageFlagBits::eTransferDst);
 
   submit_one_time_command(context, [&](const vk::CommandBuffer& buf) {
-    vk::ImageMemoryBarrier barrier{};
-    barrier.oldLayout = vk::ImageLayout::eUndefined;
-    barrier.newLayout = vk::ImageLayout::eGeneral;
-    barrier.srcQueueFamilyIndex = vk::QueueFamilyIgnored;
-    barrier.dstQueueFamilyIndex = vk::QueueFamilyIgnored;
-    barrier.image = image.handle.get();
-    barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
-    barrier.srcAccessMask = {};
-    barrier.dstAccessMask = {};
-
+    auto barrier = vk::ImageMemoryBarrier()
+                       .setOldLayout(vk::ImageLayout::eUndefined)
+                       .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+                       .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
+                       .setDstQueueFamilyIndex(vk::QueueFamilyIgnored)
+                       .setImage(image.handle.get())
+                       .setSubresourceRange(
+                           vk::ImageSubresourceRange()
+                               .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                               .setBaseMipLevel(0)
+                               .setLevelCount(1)
+                               .setBaseArrayLayer(0)
+                               .setLayerCount(1))
+                       .setSrcAccessMask({})
+                       .setDstAccessMask({});
     buf.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
-                        vk::PipelineStageFlagBits::eBottomOfPipe, {}, {}, {},
+                        vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
                         barrier);
+
+    auto subresource_range = vk::ImageSubresourceRange()
+                                 .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                                 .setBaseMipLevel(0)
+                                 .setLevelCount(1)
+                                 .setBaseArrayLayer(0)
+                                 .setLayerCount(1);
+    auto color = vk::ClearColorValue{0.0f, 0.0f, 0.0f, 0.0f};
+    buf.clearColorImage(image.handle.get(),
+                        vk::ImageLayout::eTransferDstOptimal, &color, 1,
+                        &subresource_range);
+
+    barrier.setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite);
+    buf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                        vk::PipelineStageFlagBits::eRayTracingShaderKHR, {}, {},
+                        {}, barrier);
   });
 
   auto stage_flags = vk::ShaderStageFlagBits::eRaygenKHR |

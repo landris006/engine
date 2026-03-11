@@ -16,6 +16,11 @@
 #include "rt_pipeline.h"
 #include "swapchain.h"
 
+struct PushConstants {
+  uint32_t sample_count;
+  uint32_t max_bounces;
+};
+
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 int main() {
@@ -53,6 +58,15 @@ int main() {
     auto scene = create_scene(context);
     auto rt_pipeline = create_rt_pipeline(context, swapchain.extent, scene);
 
+    uint32_t sample_count = 0;
+
+    CameraUbo cam{};
+    cam.origin = glm::vec4(0, 1, 3, 0);
+    cam.lower_left = glm::vec4(-0.582f, 0.636f, 2.0f, 0);
+    cam.horizontal = glm::vec4(1.164f, 0, 0, 0);
+    cam.vertical = glm::vec4(0, 0.728f, 0, 0);
+    update_camera(context, rt_pipeline, cam);
+
     uint32_t current_frame = 0;
     while (!glfwWindowShouldClose(window)) {
       glfwPollEvents();
@@ -76,23 +90,117 @@ int main() {
         buf->begin(vk::CommandBufferBeginInfo().setFlags(
             vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
 
-        vk::ImageMemoryBarrier barrier{};
-        barrier.oldLayout = vk::ImageLayout::eUndefined;
-        barrier.newLayout = vk::ImageLayout::ePresentSrcKHR;
-        barrier.srcQueueFamilyIndex = vk::QueueFamilyIgnored;
-        barrier.dstQueueFamilyIndex = vk::QueueFamilyIgnored;
-        barrier.image = swapchain.images[next_image_index];
-        barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-        barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
-        barrier.srcAccessMask = {};
-        barrier.dstAccessMask = {};
+        // push constants
+        sample_count++;
+        PushConstants pc{.sample_count = sample_count, .max_bounces = 4};
+        buf->pushConstants(rt_pipeline.layout.get(),
+                           vk::ShaderStageFlagBits::eRaygenKHR, 0, sizeof(pc),
+                           &pc);
 
+        // bind pipeline + descriptors
+        buf->bindPipeline(vk::PipelineBindPoint::eRayTracingKHR,
+                          rt_pipeline.pipeline.get());
+        buf->bindDescriptorSets(vk::PipelineBindPoint::eRayTracingKHR,
+                                rt_pipeline.layout.get(), 0,
+                                rt_pipeline.desc_set, {});
+
+        // trace rays
+        buf->traceRaysKHR(rt_pipeline.raygen_region, rt_pipeline.miss_region,
+                          rt_pipeline.hit_region, rt_pipeline.callable_region,
+                          swapchain.extent.width, swapchain.extent.height, 1);
+
+        // storage image: GENERAL → TRANSFER_SRC
+        auto storage_barrier =
+            vk::ImageMemoryBarrier()
+                .setOldLayout(vk::ImageLayout::eGeneral)
+                .setNewLayout(vk::ImageLayout::eTransferSrcOptimal)
+                .setImage(rt_pipeline.storage_image.handle.get())
+                .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+                .setDstAccessMask(vk::AccessFlagBits::eTransferRead)
+                .setSubresourceRange(
+                    vk::ImageSubresourceRange()
+                        .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                        .setBaseMipLevel(0)
+                        .setLevelCount(1)
+                        .setBaseArrayLayer(0)
+                        .setLayerCount(1));
+        buf->pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR,
+                             vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
+                             storage_barrier);
+
+        // swapchain image: UNDEFINED → TRANSFER_DST
+        auto swapchain_barrier =
+            vk::ImageMemoryBarrier()
+                .setOldLayout(vk::ImageLayout::eUndefined)
+                .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+                .setImage(swapchain.images[next_image_index])
+                .setSrcAccessMask({})
+                .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
+                .setSubresourceRange(
+                    vk::ImageSubresourceRange()
+                        .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                        .setBaseMipLevel(0)
+                        .setLevelCount(1)
+                        .setBaseArrayLayer(0)
+                        .setLayerCount(1));
         buf->pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                             vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
+                             swapchain_barrier);
+
+        // blit
+        auto blit =
+            vk::ImageBlit()
+                .setSrcSubresource(
+                    vk::ImageSubresourceLayers()
+                        .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                        .setMipLevel(0)
+                        .setBaseArrayLayer(0)
+                        .setLayerCount(1))
+                .setSrcOffsets({vk::Offset3D{0, 0, 0},
+                                vk::Offset3D{(int)swapchain.extent.width,
+                                             (int)swapchain.extent.height, 1}})
+                .setDstSubresource(
+                    vk::ImageSubresourceLayers()
+                        .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                        .setMipLevel(0)
+                        .setBaseArrayLayer(0)
+                        .setLayerCount(1))
+                .setDstOffsets({vk::Offset3D{0, 0, 0},
+                                vk::Offset3D{(int)swapchain.extent.width,
+                                             (int)swapchain.extent.height, 1}});
+        buf->blitImage(rt_pipeline.storage_image.handle.get(),
+                       vk::ImageLayout::eTransferSrcOptimal,
+                       swapchain.images[next_image_index],
+                       vk::ImageLayout::eTransferDstOptimal, blit,
+                       vk::Filter::eLinear);
+
+        // swapchain: TRANSFER_DST → PRESENT
+        auto present_barrier =
+            vk::ImageMemoryBarrier{}
+                .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+                .setNewLayout(vk::ImageLayout::ePresentSrcKHR)
+                .setImage(swapchain.images[next_image_index])
+                .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+                .setDstAccessMask({})
+                .setSubresourceRange(
+                    vk::ImageSubresourceRange()
+                        .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                        .setBaseMipLevel(0)
+                        .setLevelCount(1)
+                        .setBaseArrayLayer(0)
+                        .setLayerCount(1));
+        buf->pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
                              vk::PipelineStageFlagBits::eBottomOfPipe, {}, {},
-                             {}, barrier);
+                             {}, present_barrier);
+
+        // storage image back to GENERAL for next frame
+        storage_barrier.setOldLayout(vk::ImageLayout::eTransferSrcOptimal)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferRead)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite);
+        buf->pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                             vk::PipelineStageFlagBits::eRayTracingShaderKHR,
+                             {}, {}, {}, storage_barrier);
 
         buf->end();
       }

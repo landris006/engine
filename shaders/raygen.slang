@@ -39,6 +39,7 @@ void main() {
 
   // jittered UV
   float2 uv = (float2(launch_id) + float2(rand(seed), rand(seed))) / float2(launch_dim);
+  uv.y = 1.0 - uv.y;
 
   // build ray from camera
   float3 origin = camera.origin.xyz;
