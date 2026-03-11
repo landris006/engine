@@ -3,14 +3,14 @@
 #include <slang-com-ptr.h>
 #include <slang.h>
 
+#include "camera.h"
 #include "context.h"
 #include "scene.h"
 
-struct CameraUbo {
-  glm::vec4 origin;
-  glm::vec4 lower_left;
-  glm::vec4 horizontal;
-  glm::vec4 vertical;
+struct PushConstants {
+  uint32_t sample_count;
+  uint32_t max_bounces;
+  float time;
 };
 
 struct RtPipeline {
@@ -172,7 +172,7 @@ static auto create_rt_pipeline(const Context& context,
           .setSetLayouts(desc_layout.get()))[0];
 
   vk::PushConstantRange pc_range{vk::ShaderStageFlagBits::eRaygenKHR, 0,
-                                 sizeof(uint32_t) * 2};
+                                 sizeof(PushConstants)};
 
   auto layout = context.device->createPipelineLayoutUnique(
       vk::PipelineLayoutCreateInfo{}

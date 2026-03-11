@@ -12,14 +12,11 @@
 #include <cstdint>
 #include <vulkan/vulkan.hpp>
 
+#include "camera.h"
 #include "context.h"
 #include "rt_pipeline.h"
 #include "swapchain.h"
 
-struct PushConstants {
-  uint32_t sample_count;
-  uint32_t max_bounces;
-};
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
@@ -61,16 +58,26 @@ int main() {
 
     uint32_t sample_count = 0;
 
-    CameraUbo cam{};
-    cam.origin = glm::vec4(0, 1, 3, 0);
-    cam.lower_left = glm::vec4(-0.582f, 0.636f, 2.0f, 0);
-    cam.horizontal = glm::vec4(1.164f, 0, 0, 0);
-    cam.vertical = glm::vec4(0, 0.728f, 0, 0);
-    update_camera(context, rt_pipeline, cam);
+    Camera cam;
+    cam.aspect = (float)swapchain.extent.width / (float)swapchain.extent.height;
+    cam.position = glm::vec3(0, 2, 0);
+    cam.yaw = 0.0f;
+    FpsCameraController controller;
+
+    double last_time = glfwGetTime();
 
     uint32_t current_frame = 0;
     while (!glfwWindowShouldClose(window)) {
       glfwPollEvents();
+
+      double now = glfwGetTime();
+      float dt = (float)(now - last_time);
+      last_time = now;
+
+      if (controller.update(cam, window, dt)) {
+        sample_count = 0;
+      }
+      update_camera(context, rt_pipeline, cam.create_ubo());
 
       vk_check((VkResult)context.device->waitForFences(
           1, &swapchain.in_flight[current_frame].get(), true,
@@ -93,7 +100,7 @@ int main() {
 
         // push constants
         sample_count++;
-        PushConstants pc{.sample_count = sample_count, .max_bounces = 4};
+        PushConstants pc{.sample_count = sample_count, .max_bounces = 4, .time = (float)glfwGetTime()};
         buf->pushConstants(rt_pipeline.layout.get(),
                            vk::ShaderStageFlagBits::eRaygenKHR, 0, sizeof(pc),
                            &pc);

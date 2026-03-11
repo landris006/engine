@@ -35,7 +35,7 @@ void main() {
   uint2 launch_id  = DispatchRaysIndex().xy;
   uint2 launch_dim = DispatchRaysDimensions().xy;
 
-  uint seed = launch_id.x * 1973u + launch_id.y * 9277u + push_constants.sample_count * 26699u;
+  uint seed = launch_id.x * 1973u + launch_id.y * 9277u + push_constants.sample_count * 26699u + asuint(push_constants.time) * 104729u;
 
   // jittered UV
   float2 uv = (float2(launch_id) + float2(rand(seed), rand(seed))) / float2(launch_dim);
@@ -74,11 +74,12 @@ void main() {
 
     seed = payload.seed;
 
+    radiance += throughput * payload.emissive;
+
     if (payload.missed) {
       break;
     }
 
-    radiance  += throughput * payload.emissive;
     throughput *= payload.albedo;
 
     // Russian roulette after bounce 2

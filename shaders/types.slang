@@ -25,6 +25,7 @@ struct CameraUbo {
 struct PushConstants {
   uint sample_count;
   uint max_bounces;
+  float time;
 };
 
 struct HitPayload {
