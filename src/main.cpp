@@ -17,7 +17,6 @@
 #include "rt_pipeline.h"
 #include "swapchain.h"
 
-
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 int main() {
@@ -100,7 +99,10 @@ int main() {
 
         // push constants
         sample_count++;
-        PushConstants pc{.sample_count = sample_count, .max_bounces = 4, .time = (float)glfwGetTime()};
+        PushConstants pc{.sample_count = sample_count,
+                         .max_bounces = 4,
+                         .time = (float)glfwGetTime(),
+                         .light_count = scene.light_count};
         buf->pushConstants(rt_pipeline.layout.get(),
                            vk::ShaderStageFlagBits::eRaygenKHR, 0, sizeof(pc),
                            &pc);

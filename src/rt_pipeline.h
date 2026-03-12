@@ -10,7 +10,8 @@
 struct PushConstants {
   uint32_t sample_count;
   uint32_t max_bounces;
-  float time;
+  float    time;
+  uint32_t light_count;
 };
 
 struct RtPipeline {
@@ -145,12 +146,13 @@ static auto create_rt_pipeline(const Context& context,
                      vk::ShaderStageFlagBits::eMissKHR |
                      vk::ShaderStageFlagBits::eClosestHitKHR;
 
-  std::array<vk::DescriptorSetLayoutBinding, 5> bindings = {{
+  std::array<vk::DescriptorSetLayoutBinding, 6> bindings = {{
       {0, vk::DescriptorType::eAccelerationStructureKHR, 1, stage_flags},
       {1, vk::DescriptorType::eStorageImage, 1, stage_flags},
       {2, vk::DescriptorType::eUniformBuffer, 1, stage_flags},
       {3, vk::DescriptorType::eStorageBuffer, 1, stage_flags},
       {4, vk::DescriptorType::eStorageBuffer, 1, stage_flags},
+      {5, vk::DescriptorType::eStorageBuffer, 1, stage_flags},
   }};
 
   auto desc_layout = context.device->createDescriptorSetLayoutUnique(
@@ -160,7 +162,7 @@ static auto create_rt_pipeline(const Context& context,
       {vk::DescriptorType::eAccelerationStructureKHR, 1},
       {vk::DescriptorType::eStorageImage, 1},
       {vk::DescriptorType::eUniformBuffer, 1},
-      {vk::DescriptorType::eStorageBuffer, 2},
+      {vk::DescriptorType::eStorageBuffer, 3},
   }};
 
   auto desc_pool = context.device->createDescriptorPoolUnique(
@@ -308,8 +310,10 @@ static auto create_rt_pipeline(const Context& context,
                                      vk::WholeSize};
   vk::DescriptorBufferInfo mat_info{scene.material_buffer.handle.get(), 0,
                                     vk::WholeSize};
+  vk::DescriptorBufferInfo light_buf_info{
+      scene.light_triangle_buffer.handle.get(), 0, vk::WholeSize};
 
-  std::array<vk::WriteDescriptorSet, 5> writes = {{
+  std::array<vk::WriteDescriptorSet, 6> writes = {{
       // TLAS
       vk::WriteDescriptorSet{}
           .setDstSet(desc_set)
@@ -345,6 +349,13 @@ static auto create_rt_pipeline(const Context& context,
           .setDescriptorType(vk::DescriptorType::eStorageBuffer)
           .setDescriptorCount(1)
           .setPBufferInfo(&mat_info),
+      // Light triangles
+      vk::WriteDescriptorSet{}
+          .setDstSet(desc_set)
+          .setDstBinding(5)
+          .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+          .setDescriptorCount(1)
+          .setPBufferInfo(&light_buf_info),
   }};
 
   context.device->updateDescriptorSets(writes, {});

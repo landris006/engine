@@ -30,6 +30,15 @@ struct MeshInfo {
   uint32_t _pad = {};
 };
 
+struct LightTriangle {
+  glm::vec3 v0;
+  glm::vec3 v1;
+  glm::vec3 v2;
+  glm::vec3 normal;
+  float area;
+  uint32_t material_index;
+};
+
 struct Mesh {
   AllocatedBuffer vertex_buffer;
   AllocatedBuffer index_buffer;
@@ -41,6 +50,8 @@ struct Scene {
   std::vector<Mesh> meshes;
   AllocatedBuffer mesh_info_buffer;
   AllocatedBuffer material_buffer;
+  AllocatedBuffer light_triangle_buffer;
+  uint32_t light_count = 0;
 
   AllocatedBuffer tlas_buffer;
   AllocatedBuffer tlas_instance_buffer;
@@ -311,10 +322,50 @@ static auto create_scene(const Context& ctx) -> Scene {
   uploadToBuffer(ctx, material_buffer, mats.data(),
                  mats.size() * sizeof(Material));
 
+  std::vector<LightTriangle> light_tris;
+  for (size_t si = 0; si < shapes.size(); si++) {
+    const auto& mesh_indices = shapes[si].mesh;
+    uint32_t mat_idx = (uint32_t)mesh_indices.material_ids[0];
+
+    if (mats[mat_idx].emissive == glm::vec3(0)) {
+      continue;
+    }
+
+    for (size_t fi = 0; fi < mesh_indices.num_face_vertices.size(); fi++) {
+      int i0 = mesh_indices.indices[fi * 3 + 0].vertex_index;
+      int i1 = mesh_indices.indices[fi * 3 + 1].vertex_index;
+      int i2 = mesh_indices.indices[fi * 3 + 2].vertex_index;
+      glm::vec3 p0 = {attrib.vertices[3 * i0], attrib.vertices[3 * i0 + 1],
+                      attrib.vertices[3 * i0 + 2]};
+      glm::vec3 p1 = {attrib.vertices[3 * i1], attrib.vertices[3 * i1 + 1],
+                      attrib.vertices[3 * i1 + 2]};
+      glm::vec3 p2 = {attrib.vertices[3 * i2], attrib.vertices[3 * i2 + 1],
+                      attrib.vertices[3 * i2 + 2]};
+      glm::vec3 e1 = p1 - p0, e2 = p2 - p0;
+      glm::vec3 n = glm::cross(e1, e2);
+      float area = glm::length(n) * 0.5f;
+      light_tris.push_back({p0, p1, p2, glm::normalize(n), area, mat_idx});
+    }
+  }
+
+  uint32_t light_count = (uint32_t)light_tris.size();
+  auto light_triangle_buffer = createBuffer(
+      ctx, std::max(light_tris.size(), size_t(1)) * sizeof(LightTriangle),
+      vk::BufferUsageFlagBits::eStorageBuffer |
+          vk::BufferUsageFlagBits::eShaderDeviceAddress,
+      vk::MemoryPropertyFlagBits::eHostVisible |
+          vk::MemoryPropertyFlagBits::eHostCoherent);
+  if (light_count > 0) {
+    uploadToBuffer(ctx, light_triangle_buffer, light_tris.data(),
+                   light_count * sizeof(LightTriangle));
+  }
+
   return Scene{
       .meshes = std::move(meshes),
       .mesh_info_buffer = std::move(mesh_info_buffer),
       .material_buffer = std::move(material_buffer),
+      .light_triangle_buffer = std::move(light_triangle_buffer),
+      .light_count = light_count,
       .tlas_buffer = std::move(tlas_buffer),
       .tlas_instance_buffer = std::move(tlas_instance_buffer),
       .tlas_handle = std::move(tlas_handle),

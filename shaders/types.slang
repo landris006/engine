@@ -22,10 +22,20 @@ struct CameraUbo {
   float4 vertical;
 };
 
+struct LightTriangle {
+  float3 v0;
+  float3 v1;
+  float3 v2;
+  float3 normal;
+  float  area;
+  uint   material_index;
+};
+
 struct PushConstants {
-  uint sample_count;
-  uint max_bounces;
+  uint  sample_count;
+  uint  max_bounces;
   float time;
+  uint  light_count;
 };
 
 struct HitPayload {
@@ -34,8 +44,10 @@ struct HitPayload {
   float3 normal;
   float3 next_origin;
   float3 next_dir;
-  bool missed;
-  uint seed;
+  bool   missed;
+  uint   seed;
+  float  hit_dist;
+  float  light_area;
 };
 
 struct ShadowPayload {

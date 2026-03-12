@@ -26,8 +26,17 @@ void main(inout HitPayload payload, float2 attribs : SV_IntersectionAttributes) 
 
   float3 world_pos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
 
-  payload.albedo     = mat.albedo;
-  payload.emissive   = mat.emissive;
-  payload.normal     = normal;
+  payload.albedo      = mat.albedo;
+  payload.emissive    = mat.emissive;
+  payload.normal      = normal;
   payload.next_origin = world_pos + normal * 0.001;
+  payload.hit_dist    = RayTCurrent();
+
+  if (length(mat.emissive) > 0.0) {
+    float3 e1 = v1.pos - v0.pos;
+    float3 e2 = v2.pos - v0.pos;
+    payload.light_area = length(cross(e1, e2)) * 0.5;
+  } else {
+    payload.light_area = 0.0;
+  }
 }
