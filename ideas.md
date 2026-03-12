@@ -8,7 +8,7 @@ Current state: Lambertian Cornell box, NEE+MIS, hardware RT, progressive accumul
 
 ## Tier 1 — Shader-only, ~1-2h each
 
-### Tone mapping
+### Tone mapping - DONE
 **Learns:** HDR → display color pipeline, gamma correction
 - Raw linear HDR looks washed out and clipped on SDR monitors
 - Apply ACES or Reinhard curve + gamma 2.2 in raygen before writing output_image

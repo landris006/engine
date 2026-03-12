@@ -10,12 +10,13 @@
 struct PushConstants {
   uint32_t sample_count;
   uint32_t max_bounces;
-  float    time;
+  float time;
   uint32_t light_count;
 };
 
 struct RtPipeline {
-  vk::UniquePipeline pipeline;
+  vk::UniquePipeline rt_pipeline;
+  vk::UniquePipeline tonemap_pipeline;
   vk::UniquePipelineLayout layout;
   vk::UniqueDescriptorSetLayout desc_layout;
   vk::UniqueDescriptorPool desc_pool;
@@ -29,7 +30,60 @@ struct RtPipeline {
   AllocatedImage storage_image;
   AllocatedBuffer sbt_buffer;
   AllocatedBuffer camera_ubo;
+
+  AllocatedImage display_image;
 };
+
+static auto create_storage_image(const Context& context,
+                                 const vk::Extent2D extent) -> AllocatedImage {
+  auto image = createImage(
+      context, vk::Extent3D(extent.width, extent.height, 1),
+      vk::Format::eR32G32B32A32Sfloat,
+      vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc |
+          vk::ImageUsageFlagBits::eTransferDst);
+
+  submit_one_time_command(context, [&](const vk::CommandBuffer& buf) {
+    auto barrier = vk::ImageMemoryBarrier()
+                       .setOldLayout(vk::ImageLayout::eUndefined)
+                       .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+                       .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
+                       .setDstQueueFamilyIndex(vk::QueueFamilyIgnored)
+                       .setImage(image.handle.get())
+                       .setSubresourceRange(
+                           vk::ImageSubresourceRange()
+                               .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                               .setBaseMipLevel(0)
+                               .setLevelCount(1)
+                               .setBaseArrayLayer(0)
+                               .setLayerCount(1))
+                       .setSrcAccessMask({})
+                       .setDstAccessMask({});
+    buf.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                        vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
+                        barrier);
+
+    auto subresource_range = vk::ImageSubresourceRange()
+                                 .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                                 .setBaseMipLevel(0)
+                                 .setLevelCount(1)
+                                 .setBaseArrayLayer(0)
+                                 .setLayerCount(1);
+    auto color = vk::ClearColorValue{0.0f, 0.0f, 0.0f, 0.0f};
+    buf.clearColorImage(image.handle.get(),
+                        vk::ImageLayout::eTransferDstOptimal, &color, 1,
+                        &subresource_range);
+
+    barrier.setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite);
+    buf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                        vk::PipelineStageFlagBits::eRayTracingShaderKHR, {}, {},
+                        {}, barrier);
+  });
+
+  return image;
+}
 
 static auto compile_slang(const Context& ctx, const char* file,
                           const char* entry_name) -> vk::UniqueShaderModule {
@@ -96,63 +150,22 @@ static auto compile_slang(const Context& ctx, const char* file,
 static auto create_rt_pipeline(const Context& context,
                                const vk::Extent2D extent, const Scene& scene)
     -> RtPipeline {
-  auto image = createImage(
-      context, vk::Extent3D(extent.width, extent.height, 1),
-      vk::Format::eR32G32B32A32Sfloat,
-      vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc |
-          vk::ImageUsageFlagBits::eTransferDst);
-
-  submit_one_time_command(context, [&](const vk::CommandBuffer& buf) {
-    auto barrier = vk::ImageMemoryBarrier()
-                       .setOldLayout(vk::ImageLayout::eUndefined)
-                       .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
-                       .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
-                       .setDstQueueFamilyIndex(vk::QueueFamilyIgnored)
-                       .setImage(image.handle.get())
-                       .setSubresourceRange(
-                           vk::ImageSubresourceRange()
-                               .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                               .setBaseMipLevel(0)
-                               .setLevelCount(1)
-                               .setBaseArrayLayer(0)
-                               .setLayerCount(1))
-                       .setSrcAccessMask({})
-                       .setDstAccessMask({});
-    buf.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
-                        vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
-                        barrier);
-
-    auto subresource_range = vk::ImageSubresourceRange()
-                                 .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                                 .setBaseMipLevel(0)
-                                 .setLevelCount(1)
-                                 .setBaseArrayLayer(0)
-                                 .setLayerCount(1);
-    auto color = vk::ClearColorValue{0.0f, 0.0f, 0.0f, 0.0f};
-    buf.clearColorImage(image.handle.get(),
-                        vk::ImageLayout::eTransferDstOptimal, &color, 1,
-                        &subresource_range);
-
-    barrier.setOldLayout(vk::ImageLayout::eTransferDstOptimal)
-        .setNewLayout(vk::ImageLayout::eGeneral)
-        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
-        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite);
-    buf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-                        vk::PipelineStageFlagBits::eRayTracingShaderKHR, {}, {},
-                        {}, barrier);
-  });
+  auto storage_image = create_storage_image(context, extent);
+  auto display_image = create_storage_image(context, extent);
 
   auto stage_flags = vk::ShaderStageFlagBits::eRaygenKHR |
                      vk::ShaderStageFlagBits::eMissKHR |
-                     vk::ShaderStageFlagBits::eClosestHitKHR;
+                     vk::ShaderStageFlagBits::eClosestHitKHR |
+                     vk::ShaderStageFlagBits::eCompute;
 
-  std::array<vk::DescriptorSetLayoutBinding, 6> bindings = {{
+  std::array<vk::DescriptorSetLayoutBinding, 7> bindings = {{
       {0, vk::DescriptorType::eAccelerationStructureKHR, 1, stage_flags},
       {1, vk::DescriptorType::eStorageImage, 1, stage_flags},
       {2, vk::DescriptorType::eUniformBuffer, 1, stage_flags},
       {3, vk::DescriptorType::eStorageBuffer, 1, stage_flags},
       {4, vk::DescriptorType::eStorageBuffer, 1, stage_flags},
       {5, vk::DescriptorType::eStorageBuffer, 1, stage_flags},
+      {6, vk::DescriptorType::eStorageImage, 1, stage_flags},
   }};
 
   auto desc_layout = context.device->createDescriptorSetLayoutUnique(
@@ -160,7 +173,7 @@ static auto create_rt_pipeline(const Context& context,
 
   std::array<vk::DescriptorPoolSize, 4> pool_sizes = {{
       {vk::DescriptorType::eAccelerationStructureKHR, 1},
-      {vk::DescriptorType::eStorageImage, 1},
+      {vk::DescriptorType::eStorageImage, 2},
       {vk::DescriptorType::eUniformBuffer, 1},
       {vk::DescriptorType::eStorageBuffer, 3},
   }};
@@ -185,9 +198,10 @@ static auto create_rt_pipeline(const Context& context,
   auto miss_module = compile_slang(context, "miss", "main");
   auto shadow_module = compile_slang(context, "shadow_miss", "main");
   auto closesthit_module = compile_slang(context, "closesthit", "main");
+  auto tonemap_module = compile_slang(context, "tonemap", "main");
 
   // clang-format off
-  std::array<vk::PipelineShaderStageCreateInfo, 4> stages = {{
+  std::array<vk::PipelineShaderStageCreateInfo, 4> rt_stages = {{
       {{}, vk::ShaderStageFlagBits::eRaygenKHR,     raygen_module.get(),     "main"},
       {{}, vk::ShaderStageFlagBits::eMissKHR,       miss_module.get(),       "main"},
       {{}, vk::ShaderStageFlagBits::eMissKHR,       shadow_module.get(),     "main"},
@@ -226,20 +240,36 @@ static auto create_rt_pipeline(const Context& context,
           .setIntersectionShader(VK_SHADER_UNUSED_KHR),
   }};
 
-  auto pipeline_result = context.device->createRayTracingPipelineKHRUnique(
+  auto rt_pipeline_result = context.device->createRayTracingPipelineKHRUnique(
       {}, {},
       vk::RayTracingPipelineCreateInfoKHR{}
-          .setStages(stages)
+          .setStages(rt_stages)
           .setGroups(groups)
           .setMaxPipelineRayRecursionDepth(2)
           .setLayout(layout.get()));
 
-  if (pipeline_result.result != vk::Result::eSuccess) {
+  if (rt_pipeline_result.result != vk::Result::eSuccess) {
     fprintf(stderr, "[vulkan] Error: Failed to create ray tracing pipeline\n");
     std::abort();
   }
 
-  auto pipeline = std::move(pipeline_result.value);
+  auto rt_pipeline = std::move(rt_pipeline_result.value);
+
+  auto tonemap_pipeline_result = context.device->createComputePipelineUnique(
+      vk::PipelineCache(),
+      vk::ComputePipelineCreateInfo()
+          .setStage(vk::PipelineShaderStageCreateInfo()
+                        .setStage(vk::ShaderStageFlagBits::eCompute)
+                        .setModule(tonemap_module.get())
+                        .setPName("main"))
+          .setLayout(layout.get()));
+
+  if (tonemap_pipeline_result.result != vk::Result::eSuccess) {
+    fprintf(stderr, "[vulkan] Error: Failed to create tonemap pipeline\n");
+    std::abort();
+  }
+
+  auto tonemap_pipeline = std::move(tonemap_pipeline_result.value);
 
   auto rt_props =
       context.physical_device
@@ -270,7 +300,7 @@ static auto create_rt_pipeline(const Context& context,
 
   // 4 groups × handle_size bytes each
   auto handles = context.device->getRayTracingShaderGroupHandlesKHR<uint8_t>(
-      pipeline.get(), 0, 4, 4 * handle_size);
+      rt_pipeline.get(), 0, 4, 4 * handle_size);
 
   {
     auto* sbt = (uint8_t*)context.device->mapMemory(sbt_buffer.memory.get(), 0,
@@ -300,9 +330,13 @@ static auto create_rt_pipeline(const Context& context,
   vk::WriteDescriptorSetAccelerationStructureKHR tlas_info{};
   tlas_info.setAccelerationStructures(scene.tlas_handle.get());
 
-  auto image_info = vk::DescriptorImageInfo()
-                        .setImageLayout(vk::ImageLayout::eGeneral)
-                        .setImageView(image.view.get());
+  auto storage_image_info = vk::DescriptorImageInfo()
+                                .setImageLayout(vk::ImageLayout::eGeneral)
+                                .setImageView(storage_image.view.get());
+
+  auto display_image_info = vk::DescriptorImageInfo()
+                                .setImageLayout(vk::ImageLayout::eGeneral)
+                                .setImageView(display_image.view.get());
 
   vk::DescriptorBufferInfo camera_info{camera_ubo.handle.get(), 0,
                                        sizeof(CameraUbo)};
@@ -313,7 +347,7 @@ static auto create_rt_pipeline(const Context& context,
   vk::DescriptorBufferInfo light_buf_info{
       scene.light_triangle_buffer.handle.get(), 0, vk::WholeSize};
 
-  std::array<vk::WriteDescriptorSet, 6> writes = {{
+  std::array<vk::WriteDescriptorSet, 7> writes = {{
       // TLAS
       vk::WriteDescriptorSet{}
           .setDstSet(desc_set)
@@ -327,7 +361,7 @@ static auto create_rt_pipeline(const Context& context,
           .setDstBinding(1)
           .setDescriptorType(vk::DescriptorType::eStorageImage)
           .setDescriptorCount(1)
-          .setPImageInfo(&image_info),
+          .setPImageInfo(&storage_image_info),
       // Camera
       vk::WriteDescriptorSet{}
           .setDstSet(desc_set)
@@ -356,12 +390,19 @@ static auto create_rt_pipeline(const Context& context,
           .setDescriptorType(vk::DescriptorType::eStorageBuffer)
           .setDescriptorCount(1)
           .setPBufferInfo(&light_buf_info),
+      vk::WriteDescriptorSet{}
+          .setDstSet(desc_set)
+          .setDstBinding(6)
+          .setDescriptorType(vk::DescriptorType::eStorageImage)
+          .setDescriptorCount(1)
+          .setPImageInfo(&display_image_info),
   }};
 
   context.device->updateDescriptorSets(writes, {});
 
   return RtPipeline{
-      .pipeline = std::move(pipeline),
+      .rt_pipeline = std::move(rt_pipeline),
+      .tonemap_pipeline = std::move(tonemap_pipeline),
       .layout = std::move(layout),
       .desc_layout = std::move(desc_layout),
       .desc_pool = std::move(desc_pool),
@@ -370,9 +411,10 @@ static auto create_rt_pipeline(const Context& context,
       .miss_region = miss_region,
       .hit_region = hit_region,
       .callable_region = {},
-      .storage_image = std::move(image),
+      .storage_image = std::move(storage_image),
       .sbt_buffer = std::move(sbt_buffer),
       .camera_ubo = std::move(camera_ubo),
+      .display_image = std::move(display_image),
   };
 }
 

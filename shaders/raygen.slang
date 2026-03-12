@@ -179,5 +179,6 @@ void main() {
   // running average accumulation
   float4 prev = output_image[launch_id];
   float t = 1.0 / float(push_constants.sample_count);
-  output_image[launch_id] = lerp(prev, float4(radiance, 1.0), t); // prev * (n-1)/n + new/n
+
+  output_image[launch_id] = lerp(prev, float4(radiance, 1.0), t); // prev * (n-1)/n + new * 1/n
 }
