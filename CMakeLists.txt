@@ -45,3 +45,22 @@ target_compile_definitions(engine PRIVATE
   $<$<CONFIG:Debug>:DEBUG>
   VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
 )
+
+# Headless renderer
+add_executable(engine_headless src/headless.cpp)
+
+target_include_directories(engine_headless PRIVATE src external ${SLANG_INCLUDE_DIR})
+
+target_link_libraries(engine_headless PRIVATE
+    Vulkan::Vulkan
+    glm::glm
+    ${SLANG_LIB}
+)
+
+target_compile_options(engine_headless PRIVATE -Wno-missing-field-initializers)
+
+target_compile_definitions(engine_headless PRIVATE
+    HEADLESS
+    VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
+    $<$<CONFIG:Debug>:DEBUG>
+)

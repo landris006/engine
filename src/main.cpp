@@ -59,8 +59,8 @@ int main() {
 
     Camera cam;
     cam.aspect = (float)swapchain.extent.width / (float)swapchain.extent.height;
-    cam.position = glm::vec3(0, 2, 0);
-    cam.yaw = 0.0f;
+    cam.position = glm::vec3(0, 2, 10);
+    cam.yaw = glm::radians(-90.0f);
     FpsCameraController controller;
 
     double last_time = glfwGetTime();

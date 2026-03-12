@@ -5,17 +5,20 @@
 #include <cstdint>
 #include <functional>
 
+#ifndef HEADLESS
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#endif
 
 #include <ranges>
 #include <vulkan/vulkan.hpp>
 
 static const char* layers[] = {"VK_LAYER_KHRONOS_validation"};
-static const char* extensions[] = {vk::KHRSwapchainExtensionName,
-                                   vk::KHRRayTracingPipelineExtensionName,
-                                   vk::KHRAccelerationStructureExtensionName,
-                                   vk::KHRDeferredHostOperationsExtensionName};
+static const char* rt_extensions[] = {
+    vk::KHRRayTracingPipelineExtensionName,
+    vk::KHRAccelerationStructureExtensionName,
+    vk::KHRDeferredHostOperationsExtensionName,
+};
 
 struct AllocatedImage {
   vk::UniqueImage handle;
@@ -42,21 +45,24 @@ static auto createContext() -> Context {
   vk::ApplicationInfo appInfo("Vulkan.hpp Engine", 1, "No Engine", 1,
                               VK_API_VERSION_1_4);
 
-  // Instance
+  // Instance extensions
+  std::vector<const char*> instance_exts;
+#ifndef HEADLESS
   uint32_t count = 0;
-  const char** exts = glfwGetRequiredInstanceExtensions(&count);
-
+  const char** glfw_exts = glfwGetRequiredInstanceExtensions(&count);
   printf("GLFW Required extensions:\n");
   for (uint32_t i = 0; i < count; i++) {
-    printf(" - %s\n", exts[i]);
+    printf(" - %s\n", glfw_exts[i]);
+    instance_exts.push_back(glfw_exts[i]);
   }
+#endif
 
   vk::InstanceCreateInfo instance_create_info({}, &appInfo);
-  instance_create_info.enabledExtensionCount = count;
-  instance_create_info.ppEnabledExtensionNames = exts;
+  instance_create_info.enabledExtensionCount = (uint32_t)instance_exts.size();
+  instance_create_info.ppEnabledExtensionNames = instance_exts.data();
 
 #if defined(DEBUG)
-  printf("debug enabled\n");
+  printf("Debug enabled...\n");
   instance_create_info.setPEnabledLayerNames(layers);
 #endif
 
@@ -118,17 +124,23 @@ static auto createContext() -> Context {
 
   auto features = vk::PhysicalDeviceFeatures().setShaderInt64(true);
 
+  std::vector<const char*> device_exts(std::begin(rt_extensions),
+                                       std::end(rt_extensions));
+#ifndef HEADLESS
+  device_exts.push_back(vk::KHRSwapchainExtensionName);
+#endif
+
   auto device = selected_device.createDeviceUnique(
       vk::DeviceCreateInfo()
           .setPEnabledFeatures(&features)
           .setQueueCreateInfos(queue_create_info)
-          .setPEnabledExtensionNames(extensions)
+          .setPEnabledExtensionNames(device_exts)
           .setPNext(&rt_features));
 
   VULKAN_HPP_DEFAULT_DISPATCHER.init(device.get());
 
   printf("Device Extensions:\n");
-  for (const auto& extension : extensions) {
+  for (const auto& extension : device_exts) {
     printf(" - %s\n", extension);
   }
 

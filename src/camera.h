@@ -1,6 +1,8 @@
 #pragma once
 
+#ifndef HEADLESS
 #include <GLFW/glfw3.h>
+#endif
 
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
@@ -44,6 +46,7 @@ class Camera {
   }
 };
 
+#ifndef HEADLESS
 class CameraController {
  public:
   virtual ~CameraController() = default;
@@ -127,3 +130,4 @@ class FpsCameraController : public CameraController {
     return moved;
   }
 };
+#endif  // HEADLESS

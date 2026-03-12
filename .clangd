@@ -1,3 +1,4 @@
 CompileFlags:
   CompilationDatabase: build/debug
   Add: [-Wunused-variable]
+  Remove: [-DHEADLESS]
