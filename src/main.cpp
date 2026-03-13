@@ -110,9 +110,29 @@ int main() {
 
     double last_time = glfwGetTime();
 
+    static constexpr int FRAME_TIME_HISTORY = 128;
+    float frame_times[FRAME_TIME_HISTORY] = {};
+    int frame_time_idx = 0;
+    float avg_all = 0.0f;
+    uint32_t avg_all_count = 0;
+
     uint32_t current_frame = 0;
     while (!glfwWindowShouldClose(window)) {
       glfwPollEvents();
+
+      double now = glfwGetTime();
+      float dt = (float)(now - last_time);
+      last_time = now;
+      float dt_ms = dt * 1000.0f;
+      frame_times[frame_time_idx] = dt_ms;
+      frame_time_idx = (frame_time_idx + 1) % FRAME_TIME_HISTORY;
+      avg_all_count = std::min(avg_all_count + 1, 500u);
+      avg_all += (dt_ms - avg_all) / (float)avg_all_count;
+
+      float avg10 = 0.0f;
+      for (int i = 1; i <= 10; i++)
+        avg10 += frame_times[(frame_time_idx - i + FRAME_TIME_HISTORY) % FRAME_TIME_HISTORY];
+      avg10 /= 10.0f;
 
       ImGui_ImplVulkan_NewFrame();
       ImGui_ImplGlfw_NewFrame();
@@ -122,6 +142,11 @@ int main() {
       // --- ImGui windows go here ---
       ImGui::Begin("Debug");
       ImGui::Text("Samples: %u", sample_count);
+      ImGui::Text("Frame:   %6.2f ms  %5.0f fps", avg10, 1000.0f / avg10);
+      ImGui::Text("Avg all: %6.2f ms  %5.0f fps", avg_all, 1000.0f / avg_all);
+      ImGui::PlotLines("##frametimes", frame_times, FRAME_TIME_HISTORY,
+                       frame_time_idx, nullptr, 0.0f, 50.0f,
+                       ImVec2(0, 60));
       ImGui::End();
 
       ImGui::Render();
@@ -134,10 +159,6 @@ int main() {
           sample_count = 0;
         }
       }
-
-      double now = glfwGetTime();
-      float dt = (float)(now - last_time);
-      last_time = now;
 
       if (controller.update(cam, window, dt)) {
         sample_count = 0;
