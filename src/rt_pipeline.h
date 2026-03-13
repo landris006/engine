@@ -3,6 +3,8 @@
 #include <slang-com-ptr.h>
 #include <slang.h>
 
+#include <optional>
+
 #include "camera.h"
 #include "context.h"
 #include "scene.h"
@@ -86,7 +88,8 @@ static auto create_storage_image(const Context& context,
 }
 
 static auto compile_slang(const Context& ctx, const char* file,
-                          const char* entry_name) -> vk::UniqueShaderModule {
+                          const char* entry_name)
+    -> std::optional<vk::UniqueShaderModule> {
   Slang::ComPtr<slang::IGlobalSession> global_session;
   slang::createGlobalSession(global_session.writeRef());
 
@@ -114,15 +117,16 @@ static auto compile_slang(const Context& ctx, const char* file,
   }
 
   if (!module) {
-    fprintf(stderr, "[slang]: Failed to load module\n");
-    std::abort();
+    fprintf(stderr, "[slang]: Failed to load module '%s'\n", file);
+    return std::nullopt;
   }
 
   Slang::ComPtr<slang::IEntryPoint> entry_point;
   module->findEntryPointByName(entry_name, entry_point.writeRef());
   if (!entry_point) {
-    fprintf(stderr, "[slang]: Failed to find entry point\n");
-    std::abort();
+    fprintf(stderr, "[slang]: Failed to find entry point '%s' in '%s'\n",
+            entry_name, file);
+    return std::nullopt;
   };
 
   slang::IComponentType* components[] = {module, entry_point.get()};
@@ -200,12 +204,17 @@ static auto create_rt_pipeline(const Context& context,
   auto closesthit_module = compile_slang(context, "closesthit", "main");
   auto tonemap_module = compile_slang(context, "tonemap", "main");
 
+  if (!raygen_module || !miss_module || !shadow_module || !closesthit_module ||
+      !tonemap_module) {
+    std::abort();
+  }
+
   // clang-format off
   std::array<vk::PipelineShaderStageCreateInfo, 4> rt_stages = {{
-      {{}, vk::ShaderStageFlagBits::eRaygenKHR,     raygen_module.get(),     "main"},
-      {{}, vk::ShaderStageFlagBits::eMissKHR,       miss_module.get(),       "main"},
-      {{}, vk::ShaderStageFlagBits::eMissKHR,       shadow_module.get(),     "main"},
-      {{}, vk::ShaderStageFlagBits::eClosestHitKHR, closesthit_module.get(), "main"},
+      {{}, vk::ShaderStageFlagBits::eRaygenKHR,     raygen_module->get(),     "main"},
+      {{}, vk::ShaderStageFlagBits::eMissKHR,       miss_module->get(),       "main"},
+      {{}, vk::ShaderStageFlagBits::eMissKHR,       shadow_module->get(),     "main"},
+      {{}, vk::ShaderStageFlagBits::eClosestHitKHR, closesthit_module->get(), "main"},
   }};
   // clang-format on
 
@@ -260,7 +269,7 @@ static auto create_rt_pipeline(const Context& context,
       vk::ComputePipelineCreateInfo()
           .setStage(vk::PipelineShaderStageCreateInfo()
                         .setStage(vk::ShaderStageFlagBits::eCompute)
-                        .setModule(tonemap_module.get())
+                        .setModule(tonemap_module->get())
                         .setPName("main"))
           .setLayout(layout.get()));
 
@@ -416,6 +425,143 @@ static auto create_rt_pipeline(const Context& context,
       .camera_ubo = std::move(camera_ubo),
       .display_image = std::move(display_image),
   };
+}
+
+static auto reload_pipeline(const Context& context, RtPipeline& p) -> bool {
+  auto raygen_module = compile_slang(context, "raygen", "main");
+  auto miss_module = compile_slang(context, "miss", "main");
+  auto shadow_module = compile_slang(context, "shadow_miss", "main");
+  auto closesthit_module = compile_slang(context, "closesthit", "main");
+  auto tonemap_module = compile_slang(context, "tonemap", "main");
+
+  if (!raygen_module || !miss_module || !shadow_module || !closesthit_module ||
+      !tonemap_module) {
+    fprintf(stderr, "[slang]: Shader reload aborted, keeping old pipeline\n");
+    return false;
+  }
+
+  // clang-format off
+  std::array<vk::PipelineShaderStageCreateInfo, 4> rt_stages = {{
+      {{}, vk::ShaderStageFlagBits::eRaygenKHR,     raygen_module->get(),     "main"},
+      {{}, vk::ShaderStageFlagBits::eMissKHR,       miss_module->get(),       "main"},
+      {{}, vk::ShaderStageFlagBits::eMissKHR,       shadow_module->get(),     "main"},
+      {{}, vk::ShaderStageFlagBits::eClosestHitKHR, closesthit_module->get(), "main"},
+  }};
+  // clang-format on
+
+  std::array<vk::RayTracingShaderGroupCreateInfoKHR, 4> groups = {{
+      vk::RayTracingShaderGroupCreateInfoKHR{}
+          .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
+          .setGeneralShader(0)
+          .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+          .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+          .setIntersectionShader(VK_SHADER_UNUSED_KHR),
+      vk::RayTracingShaderGroupCreateInfoKHR{}
+          .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
+          .setGeneralShader(1)
+          .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+          .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+          .setIntersectionShader(VK_SHADER_UNUSED_KHR),
+      vk::RayTracingShaderGroupCreateInfoKHR{}
+          .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
+          .setGeneralShader(2)
+          .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+          .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+          .setIntersectionShader(VK_SHADER_UNUSED_KHR),
+      vk::RayTracingShaderGroupCreateInfoKHR{}
+          .setType(vk::RayTracingShaderGroupTypeKHR::eTrianglesHitGroup)
+          .setGeneralShader(VK_SHADER_UNUSED_KHR)
+          .setClosestHitShader(3)
+          .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+          .setIntersectionShader(VK_SHADER_UNUSED_KHR),
+  }};
+
+  auto rt_pipeline_result = context.device->createRayTracingPipelineKHRUnique(
+      {}, {},
+      vk::RayTracingPipelineCreateInfoKHR{}
+          .setStages(rt_stages)
+          .setGroups(groups)
+          .setMaxPipelineRayRecursionDepth(2)
+          .setLayout(p.layout.get()));
+
+  if (rt_pipeline_result.result != vk::Result::eSuccess) {
+    fprintf(stderr, "[vulkan] Error: Failed to create ray tracing pipeline\n");
+    std::abort();
+  }
+
+  auto tonemap_pipeline_result = context.device->createComputePipelineUnique(
+      vk::PipelineCache(),
+      vk::ComputePipelineCreateInfo()
+          .setStage(vk::PipelineShaderStageCreateInfo()
+                        .setStage(vk::ShaderStageFlagBits::eCompute)
+                        .setModule(tonemap_module->get())
+                        .setPName("main"))
+          .setLayout(p.layout.get()));
+
+  if (tonemap_pipeline_result.result != vk::Result::eSuccess) {
+    fprintf(stderr, "[vulkan] Error: Failed to create tonemap pipeline\n");
+    std::abort();
+  }
+
+  p.rt_pipeline = std::move(rt_pipeline_result.value);
+  p.tonemap_pipeline = std::move(tonemap_pipeline_result.value);
+
+  // Rebuild SBT
+  auto rt_props =
+      context.physical_device
+          .getProperties2<vk::PhysicalDeviceProperties2,
+                          vk::PhysicalDeviceRayTracingPipelinePropertiesKHR>()
+          .get<vk::PhysicalDeviceRayTracingPipelinePropertiesKHR>();
+
+  uint32_t handle_size = rt_props.shaderGroupHandleSize;
+  uint32_t handle_align = rt_props.shaderGroupHandleAlignment;
+  uint32_t base_align = rt_props.shaderGroupBaseAlignment;
+
+  auto align_up = [](uint32_t val, uint32_t align) {
+    return (val + align - 1) & ~(align - 1);
+  };
+
+  uint32_t handle_stride = align_up(handle_size, handle_align);
+  uint32_t raygen_size = align_up(handle_stride, base_align);
+  uint32_t miss_size = align_up(handle_stride * 2, base_align);
+  uint32_t hit_size = align_up(handle_stride, base_align);
+  uint32_t total_size = raygen_size + miss_size + hit_size;
+
+  p.sbt_buffer = createBuffer(context, total_size,
+                              vk::BufferUsageFlagBits::eShaderBindingTableKHR |
+                                  vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                              vk::MemoryPropertyFlagBits::eHostVisible |
+                                  vk::MemoryPropertyFlagBits::eHostCoherent);
+
+  auto handles = context.device->getRayTracingShaderGroupHandlesKHR<uint8_t>(
+      p.rt_pipeline.get(), 0, 4, 4 * handle_size);
+
+  {
+    auto* sbt = (uint8_t*)context.device->mapMemory(p.sbt_buffer.memory.get(),
+                                                    0, total_size);
+    memcpy(sbt, handles.data() + 0 * handle_size, handle_size);
+    memcpy(sbt + raygen_size, handles.data() + 1 * handle_size, handle_size);
+    memcpy(sbt + raygen_size + handle_stride, handles.data() + 2 * handle_size,
+           handle_size);
+    memcpy(sbt + raygen_size + miss_size, handles.data() + 3 * handle_size,
+           handle_size);
+    context.device->unmapMemory(p.sbt_buffer.memory.get());
+  }
+
+  p.raygen_region = vk::StridedDeviceAddressRegionKHR{}
+                        .setDeviceAddress(p.sbt_buffer.address)
+                        .setStride(raygen_size)
+                        .setSize(raygen_size);
+  p.miss_region = vk::StridedDeviceAddressRegionKHR{}
+                      .setDeviceAddress(p.sbt_buffer.address + raygen_size)
+                      .setStride(handle_stride)
+                      .setSize(miss_size);
+  p.hit_region =
+      vk::StridedDeviceAddressRegionKHR{}
+          .setDeviceAddress(p.sbt_buffer.address + raygen_size + miss_size)
+          .setStride(hit_size)
+          .setSize(hit_size);
+  return true;
 }
 
 static void update_camera(const Context& ctx, RtPipeline& p,

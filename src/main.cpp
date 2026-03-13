@@ -7,6 +7,8 @@
 #include "scene.h"
 
 #define TINYOBJLOADER_IMPLEMENTATION
+#include <glob.h>
+#include <sys/stat.h>
 #include <tinyobjloader/tiny_obj_loader.h>
 
 #include <cstdint>
@@ -55,6 +57,23 @@ int main() {
     auto scene = create_scene(context);
     auto rt_pipeline = create_rt_pipeline(context, swapchain.extent, scene);
 
+    // Shader hot reload — track mtimes of all .slang files
+    auto latest_mtime = []() {
+      time_t t = 0;
+      glob_t g;
+      if (glob("shaders/*.slang", 0, nullptr, &g) == 0) {
+        for (size_t i = 0; i < g.gl_pathc; i++) {
+          struct stat st;
+          if (stat(g.gl_pathv[i], &st) == 0) {
+            t = std::max(t, st.st_mtime);
+          }
+        }
+        globfree(&g);
+      }
+      return t;
+    };
+    time_t last_shader_mtime = latest_mtime();
+
     uint32_t sample_count = 0;
 
     Camera cam;
@@ -68,6 +87,15 @@ int main() {
     uint32_t current_frame = 0;
     while (!glfwWindowShouldClose(window)) {
       glfwPollEvents();
+
+      time_t current_mtime = latest_mtime();
+      if (current_mtime != last_shader_mtime) {
+        last_shader_mtime = current_mtime;
+        context.device->waitIdle();
+        if (reload_pipeline(context, rt_pipeline)) {
+          sample_count = 0;
+        }
+      }
 
       double now = glfwGetTime();
       float dt = (float)(now - last_time);
