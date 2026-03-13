@@ -1,3 +1,4 @@
+#include "config.h"
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "camera.h"
 #include "context.h"
@@ -23,7 +24,7 @@ int main(int argc, char** argv) {
 
   auto scene = create_scene(context);
 
-  vk::Extent2D extent{1280, 800};
+  vk::Extent2D extent{WINDOW_WIDHT, WINDOW_HEIGHT};
   auto rt = create_rt_pipeline(context, extent, scene);
 
   Camera cam;

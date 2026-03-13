@@ -5,6 +5,7 @@
 #include <vulkan/vulkan_core.h>
 
 #include "scene.h"
+#include "vulkan/vulkan.hpp"
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <glob.h>
@@ -15,6 +16,7 @@
 #include <vulkan/vulkan.hpp>
 
 #include "camera.h"
+#include "config.h"
 #include "context.h"
 #include "rt_pipeline.h"
 #include "swapchain.h"
@@ -35,25 +37,49 @@ int main() {
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   glfwWindowHintString(GLFW_WAYLAND_APP_ID, "super_engine");
-  GLFWwindow* window = glfwCreateWindow(1280, 800, "Hello", nullptr, nullptr);
+  GLFWwindow* window =
+      glfwCreateWindow(WINDOW_WIDHT, WINDOW_HEIGHT, "Hello", nullptr, nullptr);
 
   {
     auto context = createContext();
     auto swapchain = createSwapchain(window, context, context.command_pool);
 
-    // Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
-    // slang::createGlobalSession(slangGlobalSession.writePosition());
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
 
-    // IMGUI_CHECKVERSION();
-    // ImGui::CreateContext();
-    // ImGui_ImplGlfw_InitForVulkan(window, true);
-    //
-    // ImGui_ImplVulkan_InitInfo init_info = {};
-    // init_info.Instance = context.instance.get();
-    // init_info.PhysicalDevice = context.physical_device;
-    // init_info.Device = context.device.get();
-    // ...
-    // ImGui_ImplVulkan_Init(&init_info, render_pass.get());
+    float xscale, yscale;
+    glfwGetWindowContentScale(window, &xscale, &yscale);
+
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+
+    ImFontConfig font_cfg;
+    font_cfg.SizePixels = 20.0f;
+    ImGui::GetIO().Fonts->AddFontDefault(&font_cfg);
+    ImGui::GetStyle().ScaleAllSizes(1.5f);
+
+    ImGui_ImplGlfw_InitForVulkan(window, true);
+
+    auto swapchain_format = swapchain.format;
+    auto pipeline_rendering_info =
+        vk::PipelineRenderingCreateInfo()
+            .setColorAttachmentCount(1)
+            .setPColorAttachmentFormats(&swapchain_format);
+
+    ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.ApiVersion = VK_API_VERSION_1_4;
+    init_info.Instance = context.instance.get();
+    init_info.PhysicalDevice = context.physical_device;
+    init_info.Device = context.device.get();
+    init_info.QueueFamily = context.graphics_queue_idx;
+    init_info.Queue = context.graphics_queue;
+    init_info.DescriptorPoolSize = 1000;
+    init_info.MinImageCount = 2;
+    init_info.ImageCount = (uint32_t)swapchain.images.size();
+    init_info.UseDynamicRendering = true;
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo =
+        pipeline_rendering_info;
+    ImGui_ImplVulkan_Init(&init_info);
+
     auto scene = create_scene(context);
     auto rt_pipeline = create_rt_pipeline(context, swapchain.extent, scene);
 
@@ -87,6 +113,18 @@ int main() {
     uint32_t current_frame = 0;
     while (!glfwWindowShouldClose(window)) {
       glfwPollEvents();
+
+      ImGui_ImplVulkan_NewFrame();
+      ImGui_ImplGlfw_NewFrame();
+      ImGui::GetIO().DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+      ImGui::NewFrame();
+
+      // --- ImGui windows go here ---
+      ImGui::Begin("Debug");
+      ImGui::Text("Samples: %u", sample_count);
+      ImGui::End();
+
+      ImGui::Render();
 
       time_t current_mtime = latest_mtime();
       if (current_mtime != last_shader_mtime) {
@@ -239,14 +277,14 @@ int main() {
                        vk::ImageLayout::eTransferDstOptimal, blit,
                        vk::Filter::eLinear);
 
-        // swapchain: TRANSFER_DST → PRESENT
-        auto present_barrier =
+        // swapchain: TRANSFER_DST → COLOR_ATTACHMENT (for ImGui)
+        auto imgui_barrier =
             vk::ImageMemoryBarrier{}
                 .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
-                .setNewLayout(vk::ImageLayout::ePresentSrcKHR)
+                .setNewLayout(vk::ImageLayout::eColorAttachmentOptimal)
                 .setImage(swapchain.images[next_image_index])
                 .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
-                .setDstAccessMask({})
+                .setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite)
                 .setSubresourceRange(
                     vk::ImageSubresourceRange()
                         .setAspectMask(vk::ImageAspectFlagBits::eColor)
@@ -255,6 +293,41 @@ int main() {
                         .setBaseArrayLayer(0)
                         .setLayerCount(1));
         buf->pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                             vk::PipelineStageFlagBits::eColorAttachmentOutput,
+                             {}, {}, {}, imgui_barrier);
+
+        // ImGui dynamic rendering
+        auto color_attachment =
+            vk::RenderingAttachmentInfo()
+                .setImageView(swapchain.image_views[next_image_index].get())
+                .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
+                .setLoadOp(vk::AttachmentLoadOp::eLoad)
+                .setStoreOp(vk::AttachmentStoreOp::eStore);
+        auto rendering_info =
+            vk::RenderingInfo()
+                .setRenderArea(vk::Rect2D({0, 0}, swapchain.extent))
+                .setLayerCount(1)
+                .setColorAttachments(color_attachment);
+        buf->beginRendering(rendering_info);
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), buf.get());
+        buf->endRendering();
+
+        // swapchain: COLOR_ATTACHMENT → PRESENT
+        auto present_barrier =
+            vk::ImageMemoryBarrier{}
+                .setOldLayout(vk::ImageLayout::eColorAttachmentOptimal)
+                .setNewLayout(vk::ImageLayout::ePresentSrcKHR)
+                .setImage(swapchain.images[next_image_index])
+                .setSrcAccessMask(vk::AccessFlagBits::eColorAttachmentWrite)
+                .setDstAccessMask({})
+                .setSubresourceRange(
+                    vk::ImageSubresourceRange()
+                        .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                        .setBaseMipLevel(0)
+                        .setLevelCount(1)
+                        .setBaseArrayLayer(0)
+                        .setLayerCount(1));
+        buf->pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
                              vk::PipelineStageFlagBits::eBottomOfPipe, {}, {},
                              {}, present_barrier);
 
@@ -300,9 +373,10 @@ int main() {
     }
 
     context.device->waitIdle();
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
   }
-
-  // ImGui::DestroyContext();
 
   glfwDestroyWindow(window);
   glfwTerminate();

@@ -2,6 +2,7 @@
 
 #include <vulkan/vulkan.hpp>
 
+#include "config.h"
 #include "context.h"
 
 static constexpr int FRAMES_IN_FLIGHT = 2;
@@ -56,8 +57,8 @@ static auto createSwapchain(GLFWwindow* window, const Context& ctx,
 
   auto extent = capabilities.currentExtent;
   if (extent.width == std::numeric_limits<uint32_t>::max()) {
-    extent.width = 1280;
-    extent.height = 800;
+    extent.width = WINDOW_WIDHT;
+    extent.height = WINDOW_HEIGHT;
   }
 
   auto swapchain = ctx.device->createSwapchainKHRUnique(

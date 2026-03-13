@@ -121,6 +121,9 @@ static auto createContext() -> Context {
   auto rt_features = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR()
                          .setRayTracingPipeline(true)
                          .setPNext(&as_features);
+  auto dynamic_rendering_features = vk::PhysicalDeviceDynamicRenderingFeatures()
+                                        .setDynamicRendering(true)
+                                        .setPNext(&rt_features);
 
   auto features = vk::PhysicalDeviceFeatures().setShaderInt64(true);
 
@@ -135,7 +138,7 @@ static auto createContext() -> Context {
           .setPEnabledFeatures(&features)
           .setQueueCreateInfos(queue_create_info)
           .setPEnabledExtensionNames(device_exts)
-          .setPNext(&rt_features));
+          .setPNext(&dynamic_rendering_features));
 
   VULKAN_HPP_DEFAULT_DISPATCHER.init(device.get());
 
