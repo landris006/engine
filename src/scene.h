@@ -129,8 +129,8 @@ static auto create_blas(const Context& ctx, const Mesh& mesh,
   return {std::move(handle), std::move(buffer)};
 }
 
-static auto create_scene(const Context& ctx,
-                         const char* obj_path = "assets/cornell.obj") -> Scene {
+static auto create_scene(const Context& ctx, const char* obj_path = nullptr)
+    -> Scene {
   tinyobj::ObjReader reader;
   tinyobj::ObjReaderConfig config;
 

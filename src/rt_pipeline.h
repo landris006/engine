@@ -5,6 +5,9 @@
 
 #include <optional>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stbimage/stb_image.h>
+
 #include "camera.h"
 #include "context.h"
 #include "scene.h"
@@ -34,6 +37,9 @@ struct RtPipeline {
   AllocatedBuffer camera_ubo;
 
   AllocatedImage display_image;
+
+  AllocatedImage skybox_image;
+  vk::UniqueSampler skybox_sampler;
 };
 
 static auto create_storage_image(const Context& context,
@@ -85,6 +91,89 @@ static auto create_storage_image(const Context& context,
   });
 
   return image;
+}
+
+static auto load_skybox_image(const Context& ctx, const char* path)
+    -> AllocatedImage {
+  int w = 1, h = 1, ch = 0;
+  float* data = nullptr;
+  bool loaded = false;
+
+  if (path) {
+    printf("Loading skybox from '%s'...\n", path);
+    data = stbi_loadf(path, &w, &h, &ch, 4);
+    if (data) {
+      loaded = true;
+    } else {
+      fprintf(stderr,
+              "[stb_image]: Failed to load '%s', using white fallback\n", path);
+    }
+  }
+  float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  if (!loaded) {
+    data = white;
+  }
+
+  vk::DeviceSize size = (vk::DeviceSize)(w * h * 4 * sizeof(float));
+  auto staging = createBuffer(ctx, size, vk::BufferUsageFlagBits::eTransferSrc,
+                              vk::MemoryPropertyFlagBits::eHostVisible |
+                                  vk::MemoryPropertyFlagBits::eHostCoherent);
+  uploadToBuffer(ctx, staging, data, size);
+  if (loaded) {
+    stbi_image_free(data);
+  }
+
+  auto img = createImage(
+      ctx, vk::Extent3D{(uint32_t)w, (uint32_t)h, 1},
+      vk::Format::eR32G32B32A32Sfloat,
+      vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled);
+
+  submit_one_time_command(ctx, [&](const vk::CommandBuffer& cmd) {
+    auto subresource_range = vk::ImageSubresourceRange()
+                                 .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                                 .setBaseMipLevel(0)
+                                 .setLevelCount(1)
+                                 .setBaseArrayLayer(0)
+                                 .setLayerCount(1);
+
+    auto barrier = vk::ImageMemoryBarrier()
+                       .setOldLayout(vk::ImageLayout::eUndefined)
+                       .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+                       .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
+                       .setDstQueueFamilyIndex(vk::QueueFamilyIgnored)
+                       .setImage(img.handle.get())
+                       .setSubresourceRange(subresource_range)
+                       .setSrcAccessMask({})
+                       .setDstAccessMask(vk::AccessFlagBits::eTransferWrite);
+    cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                        vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
+                        barrier);
+
+    auto copy = vk::BufferImageCopy()
+                    .setBufferOffset(0)
+                    .setBufferRowLength(0)
+                    .setBufferImageHeight(0)
+                    .setImageSubresource(
+                        vk::ImageSubresourceLayers()
+                            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                            .setMipLevel(0)
+                            .setBaseArrayLayer(0)
+                            .setLayerCount(1))
+                    .setImageOffset({0, 0, 0})
+                    .setImageExtent({(uint32_t)w, (uint32_t)h, 1});
+    cmd.copyBufferToImage(staging.handle.get(), img.handle.get(),
+                          vk::ImageLayout::eTransferDstOptimal, copy);
+
+    barrier.setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+    cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                        vk::PipelineStageFlagBits::eRayTracingShaderKHR, {}, {},
+                        {}, barrier);
+  });
+
+  return img;
 }
 
 static auto compile_slang(const Context& ctx, const char* file,
@@ -152,7 +241,8 @@ static auto compile_slang(const Context& ctx, const char* file,
 }
 
 static auto create_rt_pipeline(const Context& context,
-                               const vk::Extent2D extent, const Scene& scene)
+                               const vk::Extent2D extent, const Scene& scene,
+                               const char* skybox_path = nullptr)
     -> RtPipeline {
   auto storage_image = create_storage_image(context, extent);
   auto display_image = create_storage_image(context, extent);
@@ -162,7 +252,7 @@ static auto create_rt_pipeline(const Context& context,
                      vk::ShaderStageFlagBits::eClosestHitKHR |
                      vk::ShaderStageFlagBits::eCompute;
 
-  std::array<vk::DescriptorSetLayoutBinding, 7> bindings = {{
+  std::array<vk::DescriptorSetLayoutBinding, 8> bindings = {{
       {0, vk::DescriptorType::eAccelerationStructureKHR, 1, stage_flags},
       {1, vk::DescriptorType::eStorageImage, 1, stage_flags},
       {2, vk::DescriptorType::eUniformBuffer, 1, stage_flags},
@@ -170,16 +260,18 @@ static auto create_rt_pipeline(const Context& context,
       {4, vk::DescriptorType::eStorageBuffer, 1, stage_flags},
       {5, vk::DescriptorType::eStorageBuffer, 1, stage_flags},
       {6, vk::DescriptorType::eStorageImage, 1, stage_flags},
+      {7, vk::DescriptorType::eCombinedImageSampler, 1, stage_flags},
   }};
 
   auto desc_layout = context.device->createDescriptorSetLayoutUnique(
       vk::DescriptorSetLayoutCreateInfo{}.setBindings(bindings));
 
-  std::array<vk::DescriptorPoolSize, 4> pool_sizes = {{
+  std::array<vk::DescriptorPoolSize, 5> pool_sizes = {{
       {vk::DescriptorType::eAccelerationStructureKHR, 1},
       {vk::DescriptorType::eStorageImage, 2},
       {vk::DescriptorType::eUniformBuffer, 1},
       {vk::DescriptorType::eStorageBuffer, 3},
+      {vk::DescriptorType::eCombinedImageSampler, 1},
   }};
 
   auto desc_pool = context.device->createDescriptorPoolUnique(
@@ -336,6 +428,16 @@ static auto create_rt_pipeline(const Context& context,
                                  vk::MemoryPropertyFlagBits::eHostVisible |
                                      vk::MemoryPropertyFlagBits::eHostCoherent);
 
+  auto skybox_image = load_skybox_image(context, skybox_path);
+  auto skybox_sampler = context.device->createSamplerUnique(
+      vk::SamplerCreateInfo()
+          .setMagFilter(vk::Filter::eLinear)
+          .setMinFilter(vk::Filter::eLinear)
+          .setAddressModeU(vk::SamplerAddressMode::eRepeat)
+          .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
+          .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
+          .setMaxLod(vk::LodClampNone));
+
   vk::WriteDescriptorSetAccelerationStructureKHR tlas_info{};
   tlas_info.setAccelerationStructures(scene.tlas_handle.get());
 
@@ -356,7 +458,13 @@ static auto create_rt_pipeline(const Context& context,
   vk::DescriptorBufferInfo light_buf_info{
       scene.light_triangle_buffer.handle.get(), 0, vk::WholeSize};
 
-  std::array<vk::WriteDescriptorSet, 7> writes = {{
+  auto skybox_info =
+      vk::DescriptorImageInfo()
+          .setSampler(skybox_sampler.get())
+          .setImageView(skybox_image.view.get())
+          .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
+
+  std::array<vk::WriteDescriptorSet, 8> writes = {{
       // TLAS
       vk::WriteDescriptorSet{}
           .setDstSet(desc_set)
@@ -405,6 +513,13 @@ static auto create_rt_pipeline(const Context& context,
           .setDescriptorType(vk::DescriptorType::eStorageImage)
           .setDescriptorCount(1)
           .setPImageInfo(&display_image_info),
+      // Skybox
+      vk::WriteDescriptorSet{}
+          .setDstSet(desc_set)
+          .setDstBinding(7)
+          .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+          .setDescriptorCount(1)
+          .setPImageInfo(&skybox_info),
   }};
 
   context.device->updateDescriptorSets(writes, {});
@@ -424,6 +539,8 @@ static auto create_rt_pipeline(const Context& context,
       .sbt_buffer = std::move(sbt_buffer),
       .camera_ubo = std::move(camera_ubo),
       .display_image = std::move(display_image),
+      .skybox_image = std::move(skybox_image),
+      .skybox_sampler = std::move(skybox_sampler),
   };
 }
 

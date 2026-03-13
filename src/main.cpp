@@ -25,10 +25,12 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 int main(int argc, char** argv) {
   const char* model_path = "assets/cornell.obj";
+  const char* skybox_path = "assets/skybox.hdr";
   for (int i = 1; i < argc - 1; i++) {
-    if (strcmp(argv[i], "--model") == 0) {
+    if (strcmp(argv[i], "--model") == 0)
       model_path = argv[i + 1];
-    }
+    else if (strcmp(argv[i], "--skybox") == 0)
+      skybox_path = argv[i + 1];
   }
 
   glfwSetErrorCallback(glfw_error_callback);
@@ -88,7 +90,8 @@ int main(int argc, char** argv) {
     ImGui_ImplVulkan_Init(&init_info);
 
     auto scene = create_scene(context, model_path);
-    auto rt_pipeline = create_rt_pipeline(context, swapchain.extent, scene);
+    auto rt_pipeline =
+        create_rt_pipeline(context, swapchain.extent, scene, skybox_path);
 
     // Shader hot reload — track mtimes of all .slang files
     auto latest_mtime = []() {

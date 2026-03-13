@@ -17,8 +17,10 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 int main(int argc, char** argv) {
   uint32_t num_samples = 256;
   const char* model_path = "assets/cornell.obj";
+  const char* skybox_path = "assets/skybox.hdr";
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--model") == 0 && i + 1 < argc) model_path = argv[++i];
+    else if (strcmp(argv[i], "--skybox") == 0 && i + 1 < argc) skybox_path = argv[++i];
     else if (strcmp(argv[i], "--samples") == 0 && i + 1 < argc) num_samples = (uint32_t)atoi(argv[++i]);
     else num_samples = (uint32_t)atoi(argv[i]);  // positional fallback
   }
@@ -28,7 +30,7 @@ int main(int argc, char** argv) {
   auto scene = create_scene(context, model_path);
 
   vk::Extent2D extent{WINDOW_WIDHT, WINDOW_HEIGHT};
-  auto rt = create_rt_pipeline(context, extent, scene);
+  auto rt = create_rt_pipeline(context, extent, scene, skybox_path);
 
   Camera cam;
   cam.aspect = (float)extent.width / (float)extent.height;

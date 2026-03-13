@@ -18,6 +18,9 @@ void main(uint2 globalThreadID: SV_DispatchThreadID)
 
   float4 color = in_image[globalThreadID.xy];
 
+  static const float exposure = 0.3;
+  color *= exposure;
+
   // color = color / (color + float4(1.0)); // Reinhard
   color = (color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14);  // ACES
 
