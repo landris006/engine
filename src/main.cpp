@@ -23,7 +23,14 @@
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
-int main() {
+int main(int argc, char** argv) {
+  const char* model_path = "assets/cornell.obj";
+  for (int i = 1; i < argc - 1; i++) {
+    if (strcmp(argv[i], "--model") == 0) {
+      model_path = argv[i + 1];
+    }
+  }
+
   glfwSetErrorCallback(glfw_error_callback);
 
   if (!glfwInit()) {
@@ -80,7 +87,7 @@ int main() {
         pipeline_rendering_info;
     ImGui_ImplVulkan_Init(&init_info);
 
-    auto scene = create_scene(context);
+    auto scene = create_scene(context, model_path);
     auto rt_pipeline = create_rt_pipeline(context, swapchain.extent, scene);
 
     // Shader hot reload — track mtimes of all .slang files
@@ -131,7 +138,8 @@ int main() {
 
       float avg10 = 0.0f;
       for (int i = 1; i <= 10; i++)
-        avg10 += frame_times[(frame_time_idx - i + FRAME_TIME_HISTORY) % FRAME_TIME_HISTORY];
+        avg10 += frame_times[(frame_time_idx - i + FRAME_TIME_HISTORY) %
+                             FRAME_TIME_HISTORY];
       avg10 /= 10.0f;
 
       ImGui_ImplVulkan_NewFrame();
@@ -145,8 +153,7 @@ int main() {
       ImGui::Text("Frame:   %6.2f ms  %5.0f fps", avg10, 1000.0f / avg10);
       ImGui::Text("Avg all: %6.2f ms  %5.0f fps", avg_all, 1000.0f / avg_all);
       ImGui::PlotLines("##frametimes", frame_times, FRAME_TIME_HISTORY,
-                       frame_time_idx, nullptr, 0.0f, 50.0f,
-                       ImVec2(0, 60));
+                       frame_time_idx, nullptr, 0.0f, 50.0f, ImVec2(0, 60));
       ImGui::End();
 
       ImGui::Render();

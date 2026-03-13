@@ -3,6 +3,7 @@
 #include <tinyobjloader/tiny_obj_loader.h>
 
 #include <cstdint>
+#include <string>
 
 #include "context.h"
 #include "vulkan/vulkan.hpp"
@@ -128,12 +129,18 @@ static auto create_blas(const Context& ctx, const Mesh& mesh,
   return {std::move(handle), std::move(buffer)};
 }
 
-static auto create_scene(const Context& ctx) -> Scene {
+static auto create_scene(const Context& ctx,
+                         const char* obj_path = "assets/cornell.obj") -> Scene {
   tinyobj::ObjReader reader;
   tinyobj::ObjReaderConfig config;
-  config.mtl_search_path = "assets/";
 
-  if (!reader.ParseFromFile("assets/cornell.obj", config)) {
+  // set mtl search path to the directory containing the obj file
+  std::string path_str(obj_path);
+  auto slash = path_str.find_last_of("/\\");
+  config.mtl_search_path =
+      slash != std::string::npos ? path_str.substr(0, slash + 1) : "./";
+
+  if (!reader.ParseFromFile(obj_path, config)) {
     if (!reader.Error().empty())
       fprintf(stderr, "tinyobj error: %s\n", reader.Error().c_str());
     std::abort();
