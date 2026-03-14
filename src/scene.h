@@ -188,7 +188,10 @@ static auto create_scene(const Context& ctx, const char* obj_path = nullptr)
     mesh_info[i] = MeshInfo{
         .vertex_address = meshes[i].vertex_buffer.address,
         .index_address = meshes[i].index_buffer.address,
-        .material_index = (uint32_t)shape.mesh.material_ids[0],
+        .material_index =
+            shape.mesh.material_ids.empty() || shape.mesh.material_ids[0] < 0
+                ? 0u
+                : (uint32_t)shape.mesh.material_ids[0],
     };
 
     auto [blas_handle, blas_buffer] =
@@ -282,25 +285,37 @@ static auto create_scene(const Context& ctx, const char* obj_path = nullptr)
   uploadToBuffer(ctx, mesh_info_buffer, mesh_info.data(),
                  mesh_info.size() * sizeof(MeshInfo));
 
-  auto mats = std::vector<Material>(materials.size());
-  for (const auto& [i, mat] : materials | std::views::enumerate) {
-    Material m{};
-    m.albedo = {mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]};
+  // Always keep at least one placeholder so buffers are never zero-sized.
+  // Index 0 is either the first real material or the fallback white diffuse.
+  auto mats = std::vector<Material>();
+  if (materials.empty()) {
+    mats.push_back(Material{
+        .albedo = {0.8f, 0.8f, 0.8f},
+        .emissive = {},
+        .metallic = 0.0f,
+        .roughness = 1.0f,
+    });
+  } else {
+    mats.resize(materials.size());
+    for (const auto& [i, mat] : materials | std::views::enumerate) {
+      Material m{};
+      m.albedo = {mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]};
 
-    if (mat.name == "Light")
-      m.emissive = {15.0f, 15.0f, 15.0f};
-    else
-      m.emissive = {0.0f, 0.0f, 0.0f};
+      if (mat.name == "Light")
+        m.emissive = {15.0f, 15.0f, 15.0f};
+      else
+        m.emissive = {0.0f, 0.0f, 0.0f};
 
-    if (mat.roughness > 0.0f) {
-      m.roughness = mat.roughness;
-    } else {
-      m.roughness = 1.0f;
+      if (mat.roughness > 0.0f) {
+        m.roughness = mat.roughness;
+      } else {
+        m.roughness = 1.0f;
+      }
+
+      m.metallic = mat.metallic;
+
+      mats[i] = m;
     }
-
-    m.metallic = mat.metallic;
-
-    mats[i] = m;
   }
 
   auto material_buffer =
@@ -315,6 +330,9 @@ static auto create_scene(const Context& ctx, const char* obj_path = nullptr)
   std::vector<LightTriangle> light_tris;
   for (size_t si = 0; si < shapes.size(); si++) {
     const auto& mesh_indices = shapes[si].mesh;
+    if (mesh_indices.material_ids.empty() || mesh_indices.material_ids[0] < 0) {
+      continue;
+    }
     uint32_t mat_idx = (uint32_t)mesh_indices.material_ids[0];
 
     if (mats[mat_idx].emissive == glm::vec3(0)) {
