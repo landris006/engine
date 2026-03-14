@@ -31,7 +31,7 @@ Current state: Lambertian Cornell box, NEE+MIS, hardware RT, progressive accumul
 
 ## Tier 2 — New material types, ~4-8h each
 
-### Mirror (perfect specular)
+### Mirror (perfect specular) - DONE
 **Learns:** specular reflection, material branching in shaders
 - `reflect(dir, normal)` — no randomness
 - Add material type field; closesthit branches on it
@@ -50,7 +50,7 @@ Current state: Lambertian Cornell box, NEE+MIS, hardware RT, progressive accumul
 - Pure camera change, no BRDF involved
 - Files: `raygen.slang`, `camera.h`
 
-### HDR environment map
+### HDR environment map - DONE
 **Learns:** texture sampling in shaders, importance sampling an environment
 - Load `.hdr` file (stb_image), upload as VkImage, sample in miss shader by ray direction → spherical UV
 - Simple version: just sample without importance sampling
@@ -60,7 +60,7 @@ Current state: Lambertian Cornell box, NEE+MIS, hardware RT, progressive accumul
 
 ## Tier 3 — More involved, ~20-40h each
 
-### GGX microfacet BRDF
+### GGX microfacet BRDF - DONE
 **Learns:** microfacet theory, specular importance sampling, rough metals/dielectrics
 - D (GGX normal distribution), G (Smith geometry), F (Fresnel) terms
 - Need to importance-sample the GGX distribution (sample visible normals)
