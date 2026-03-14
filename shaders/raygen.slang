@@ -1,5 +1,7 @@
 import types;
 import constants;
+import rand;
+import bsdf;
 
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure tlas;
 [[vk::binding(1, 0)]] RWTexture2D<float4> output_image;
@@ -8,35 +10,6 @@ import constants;
 [[vk::binding(5, 0)]] StructuredBuffer<LightTriangle> light_triangles;
 
 [[vk::push_constant]] ConstantBuffer<PushConstants> push_constants;
-
-uint pcg(inout uint state) {
-  state = state * 747796405u + 2891336453u;
-  uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-  return (word >> 22u) ^ word;
-}
-
-float rand(inout uint seed) {
-  return float(pcg(seed)) / float(0xffffffffu);
-}
-
-float3 cosine_hemisphere(inout uint seed, float3 n) {
-  float r1 = rand(seed);
-  float r2 = rand(seed);
-  float r = sqrt(r1);
-  float phi = 2.0 * PI * r2;
-  float3 h = float3(r * cos(phi), r * sin(phi), sqrt(1.0 - r1));
-  // build ONB around n
-  float3 up = abs(n.x) < 0.999 ? float3(1, 0, 0) : float3(0, 1, 0);
-  float3 tangent = normalize(cross(up, n));
-  float3 bitangent = cross(n, tangent);
-  return normalize(tangent * h.x + bitangent * h.y + n * h.z);
-}
-
-float power_heuristic(float pdf_a, float pdf_b) {
-  float a2 = pdf_a * pdf_a;
-  return a2 / (a2 + pdf_b * pdf_b);
-}
-
 
 [shader("raygeneration")]
 void main() {
@@ -60,7 +33,11 @@ void main() {
   float3 radiance   = float3(0, 0, 0);
   float3 throughput = float3(1, 1, 1);
 
-  float3 prev_normal = float3(0, 0, 1);
+  float3 prev_normal    = float3(0, 0, 1);
+  float3 prev_albedo    = float3(0);
+  float  prev_metallic  = 0.0;
+  float  prev_roughness = 1.0;
+  float3 V_prev         = float3(0, 1, 0); // dummy, only used at bounce >= 1
 
   for (uint bounce = 0; bounce < push_constants.max_bounces; bounce++) {
     HitPayload payload;
@@ -98,7 +75,8 @@ void main() {
       } else {
         // BRDF-sampled bounce hit an emissive. MIS weight against NEE strategy.
         float cos_surf = max(dot(dir, prev_normal), 0.0);
-        float pdf_brdf = cos_surf / PI;
+        float pdf_brdf = pdf_bsdf(prev_albedo, prev_metallic, prev_roughness,
+                          V_prev, dir, prev_normal);
 
         float cos_light = max(dot(-dir, payload.normal), 0.0);
         float pdf_light = 0.0;
@@ -151,15 +129,26 @@ void main() {
         if (!sp.occluded) {
           Material lmat   = materials[lt.material_index];
           float pdf_light = (dist * dist) / (cos_light * lt.area * float(push_constants.light_count));
-          float pdf_brdf  = cos_surf / PI;
-          float w_nee     = power_heuristic(pdf_light, pdf_brdf);
-          radiance += throughput * payload.albedo * lmat.emissive *
-                      cos_surf * w_nee / pdf_light / PI;
+
+          float3 V_curr       = -dir;
+          float3 bsdf_nee     = eval_bsdf(payload.albedo, payload.metallic, payload.roughness,
+                                          V_curr, light_dir, payload.normal);
+          float  pdf_brdf_nee = pdf_bsdf(payload.albedo, payload.metallic, payload.roughness,
+                                         V_curr, light_dir, payload.normal);
+          float  w_nee        = power_heuristic(pdf_light, pdf_brdf_nee);
+          radiance += throughput * lmat.emissive * bsdf_nee * w_nee / pdf_light;
         }
       }
     }
 
-    throughput *= payload.albedo;
+
+    float3 V = -dir;
+    float3 brdf_weight;
+    dir = sample_bsdf(seed, V, payload.normal,
+                      payload.albedo, payload.metallic, payload.roughness,
+                      brdf_weight);
+
+    throughput *= brdf_weight;
 
     // --- Russian roulette ---
     if (bounce >= 2) {
@@ -171,9 +160,13 @@ void main() {
     }
 
     // --- next bounce ---
-    prev_normal = payload.normal;
-    dir         = cosine_hemisphere(seed, payload.normal);
-    origin      = payload.next_origin;
+
+    prev_albedo    = payload.albedo;
+    prev_metallic  = payload.metallic;
+    prev_roughness = payload.roughness;
+    prev_normal    = payload.normal;
+    V_prev         = V;
+    origin         = payload.next_origin;
   }
 
   // running average accumulation

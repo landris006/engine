@@ -7,12 +7,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 
-struct CameraUbo {
-  glm::vec4 origin;
-  glm::vec4 lower_left;
-  glm::vec4 horizontal;
-  glm::vec4 vertical;
-};
+#include "shared_types.h"
 
 class Camera {
  public:

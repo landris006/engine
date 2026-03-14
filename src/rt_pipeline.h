@@ -12,13 +12,6 @@
 #include "context.h"
 #include "scene.h"
 
-struct PushConstants {
-  uint32_t sample_count;
-  uint32_t max_bounces;
-  float time;
-  uint32_t light_count;
-};
-
 struct RtPipeline {
   vk::UniquePipeline rt_pipeline;
   vk::UniquePipeline tonemap_pipeline;
@@ -188,12 +181,12 @@ static auto compile_slang(const Context& ctx, const char* file,
       .forceGLSLScalarBufferLayout = true,
   };
 
-  const char* search_paths[] = {"shaders"};
+  const char* search_paths[] = {"shaders", "src"};
 
   slang::SessionDesc session_desc{.targets = &target_desc,
                                   .targetCount = 1,
                                   .searchPaths = search_paths,
-                                  .searchPathCount = 1};
+                                  .searchPathCount = 2};
 
   Slang::ComPtr<slang::ISession> session;
   global_session->createSession(session_desc, session.writeRef());

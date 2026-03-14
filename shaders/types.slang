@@ -1,43 +1,8 @@
-struct Vertex {
-  float3 pos;
-  float3 normal;
-};
+#include "../src/shared_types.h"
 
-struct Material {
-  float3 albedo;
-  float3 emissive;
-};
+// Shader-only types (never accessed from C++)
 
-struct MeshInfo {
-  uint64_t vertex_address;
-  uint64_t index_address;
-  uint32_t material_index;
-  uint32_t pad;
-};
-
-struct CameraUbo {
-  float4 origin;
-  float4 lower_left;
-  float4 horizontal;
-  float4 vertical;
-};
-
-struct LightTriangle {
-  float3 v0;
-  float3 v1;
-  float3 v2;
-  float3 normal;
-  float  area;
-  uint   material_index;
-};
-
-struct PushConstants {
-  uint  sample_count;
-  uint  max_bounces;
-  float time;
-  uint  light_count;
-};
-
+// this is how closesthit communicates with raygen
 struct HitPayload {
   float3 albedo;
   float3 emissive;
@@ -48,6 +13,8 @@ struct HitPayload {
   uint   seed;
   float  hit_dist;
   float  light_area;
+  float  metallic;
+  float  roughness;
 };
 
 struct ShadowPayload {

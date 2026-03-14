@@ -31,6 +31,8 @@ void main(inout HitPayload payload, float2 attribs : SV_IntersectionAttributes) 
   payload.normal      = normal;
   payload.next_origin = world_pos + normal * 0.001;
   payload.hit_dist    = RayTCurrent();
+  payload.metallic    = mat.metallic;
+  payload.roughness   = mat.roughness;
 
   if (length(mat.emissive) > 0.0) {
     float3 e1 = v1.pos - v0.pos;

@@ -6,39 +6,14 @@
 #include <string>
 
 #include "context.h"
-#include "vulkan/vulkan.hpp"
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtx/hash.hpp>
 
+#include "shared_types.h"
+
 static constexpr char ASSETS_DIR[] = "assets";
-
-struct Vertex {
-  glm::vec3 pos;
-  glm::vec3 normal;
-};
-
-struct Material {
-  glm::vec3 albedo;
-  glm::vec3 emissive;
-};
-
-struct MeshInfo {
-  vk::DeviceAddress vertex_address;
-  vk::DeviceAddress index_address;
-  uint32_t material_index;
-  uint32_t _pad = {};
-};
-
-struct LightTriangle {
-  glm::vec3 v0;
-  glm::vec3 v1;
-  glm::vec3 v2;
-  glm::vec3 normal;
-  float area;
-  uint32_t material_index;
-};
 
 struct Mesh {
   AllocatedBuffer vertex_buffer;
@@ -316,6 +291,14 @@ static auto create_scene(const Context& ctx, const char* obj_path = nullptr)
       m.emissive = {15.0f, 15.0f, 15.0f};
     else
       m.emissive = {0.0f, 0.0f, 0.0f};
+
+    if (mat.roughness > 0.0f) {
+      m.roughness = mat.roughness;
+    } else {
+      m.roughness = 1.0f;
+    }
+
+    m.metallic = mat.metallic;
 
     mats[i] = m;
   }

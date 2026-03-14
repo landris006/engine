@@ -1,6 +1,3 @@
-import types;
-import constants;
-
 [[vk::binding(1, 0)]] RWTexture2D<float4> in_image;
 [[vk::binding(6, 0)]] RWTexture2D<float4> out_image;
 

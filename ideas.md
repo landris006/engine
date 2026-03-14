@@ -15,7 +15,7 @@ Current state: Lambertian Cornell box, NEE+MIS, hardware RT, progressive accumul
 - Add exposure control via push constant
 - Files: `raygen.slang`
 
-### Sky / environment color
+### Sky / environment color - DONE
 **Learns:** miss shader role, sky models
 - Replace black sky with a gradient (horizon/zenith lerp) or physically-based sky (Preetham)
 - Simple version: lerp blue→white based on ray.y in `miss.slang`
