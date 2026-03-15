@@ -1,5 +1,6 @@
 import types;
 import constants;
+import utils;
 
 [[vk::binding(7, 0)]] Sampler2D skybox;
 
@@ -11,6 +12,6 @@ void main(inout HitPayload payload) {
   float u = (phi + PI) / (2.0f * PI);
   float v = theta / PI;
 
-  payload.emissive = skybox.SampleLevel(float2(u, v), 0.0f).rgb;
+  payload.emissive = sample_skybox(dir, skybox);
   payload.missed   = true;
 }

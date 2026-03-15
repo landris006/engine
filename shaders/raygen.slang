@@ -2,12 +2,14 @@ import types;
 import constants;
 import rand;
 import bsdf;
+import utils;
 
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure tlas;
 [[vk::binding(1, 0)]] RWTexture2D<float4> output_image;
 [[vk::binding(2, 0)]] ConstantBuffer<CameraUbo> camera;
 [[vk::binding(4, 0)]] StructuredBuffer<Material> materials;
 [[vk::binding(5, 0)]] StructuredBuffer<LightTriangle> light_triangles;
+[[vk::binding(7, 0)]] Sampler2D skybox;
 
 [[vk::push_constant]] ConstantBuffer<PushConstants> push_constants;
 
@@ -63,7 +65,17 @@ void main() {
 
     // --- sky miss ---
     if (payload.missed) {
-      radiance += throughput * payload.emissive;
+      float3 sky_color = payload.emissive;
+      if (bounce > 0 && push_constants.light_count == 0) {
+        // MIS: weight this BRDF-sampled sky hit against the cosine-hemisphere sky NEE pdf
+        float pdf_sky_nee = max(dot(dir, prev_normal), 0.0) / PI;
+        float pdf_brdf    = pdf_bsdf(prev_albedo, prev_metallic, prev_roughness,
+                                     V_prev, dir, prev_normal);
+        float w = (pdf_sky_nee > 0.0) ? power_heuristic(pdf_brdf, pdf_sky_nee) : 1.0;
+        radiance += throughput * sky_color * w;
+      } else {
+        radiance += throughput * sky_color;
+      }
       break;
     }
 
@@ -141,6 +153,32 @@ void main() {
       }
     }
 
+    // --- NEE: sky sampling (fallback when no explicit lights) ---
+    if (push_constants.light_count == 0) {
+      float3 sky_dir  = cosine_hemisphere(seed, payload.normal);
+      float  cos_surf = max(dot(sky_dir, payload.normal), 0.0);
+      float  pdf_sky  = cos_surf / PI;
+      if (pdf_sky > 0.0) {
+        ShadowPayload sp;
+        sp.occluded = true;
+        RayDesc sr;
+        sr.Origin    = payload.next_origin;
+        sr.Direction = sky_dir;
+        sr.TMin      = 0.0;
+        sr.TMax      = 1e9;
+        TraceRay(tlas, 0x0Cu, 0xFF, 0, 1, 1, sr, sp);
+        if (!sp.occluded) {
+          float3 sky_radiance = sample_skybox(sky_dir, skybox);
+          float3 V_curr       = -dir;
+          float3 bsdf_val     = eval_bsdf(payload.albedo, payload.metallic, payload.roughness,
+                                          V_curr, sky_dir, payload.normal);
+          float  pdf_brdf_nee = pdf_bsdf(payload.albedo, payload.metallic, payload.roughness,
+                                         V_curr, sky_dir, payload.normal);
+          float  w_nee        = power_heuristic(pdf_sky, pdf_brdf_nee);
+          radiance += throughput * sky_radiance * bsdf_val * w_nee / pdf_sky;
+        }
+      }
+    }
 
     float3 V = -dir;
     float3 brdf_weight;
