@@ -20,8 +20,8 @@ static auto vk_check(VkResult err) -> void {
   }
 }
 
-static auto load_texture(const Context& ctx, const void* pixels, int w, int h)
-    -> AllocatedImage {
+static auto load_texture(const Context& ctx, const void* pixels, int w, int h,
+                         bool srgb = false) -> AllocatedImage {
   vk::DeviceSize size = (vk::DeviceSize)(w * h * 4 * sizeof(uint8_t));
   auto staging = createBuffer(ctx, size, vk::BufferUsageFlagBits::eTransferSrc,
                               vk::MemoryPropertyFlagBits::eHostVisible |
@@ -29,9 +29,9 @@ static auto load_texture(const Context& ctx, const void* pixels, int w, int h)
 
   uploadToBuffer(ctx, staging, pixels, size);
 
+  auto fmt = srgb ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
   auto img = createImage(
-      ctx, vk::Extent3D{(uint32_t)w, (uint32_t)h, 1},
-      vk::Format::eR8G8B8A8Unorm,
+      ctx, vk::Extent3D{(uint32_t)w, (uint32_t)h, 1}, fmt,
       vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled);
 
   submit_one_time_command(ctx, [&](const vk::CommandBuffer& cmd) {

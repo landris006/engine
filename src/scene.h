@@ -14,6 +14,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
 #include <string>
+#include <unordered_set>
 
 #include "context.h"
 #include "utils.h"
@@ -728,12 +729,14 @@ static auto load_materials(const fastgltf::Asset& asset)
 }
 
 static auto load_textures(const Context& ctx, const fastgltf::Asset& asset,
-                          std::filesystem::path path)
+                          std::filesystem::path path,
+                          const std::unordered_set<size_t>& srgb_images)
     -> std::vector<AllocatedImage> {
   auto textures = std::vector<AllocatedImage>();
 
   textures.reserve(asset.images.size());
-  for (const auto& image : asset.images) {
+  for (const auto& [img_idx, image] : asset.images | std::views::enumerate) {
+    bool srgb = srgb_images.contains(img_idx);
     std::visit(
         fastgltf::visitor{
             [](auto&) {},
@@ -759,7 +762,7 @@ static auto load_textures(const Context& ctx, const fastgltf::Asset& asset,
                 std::exit(1);
               }
 
-              auto texture = load_texture(ctx, data, width, height);
+              auto texture = load_texture(ctx, data, width, height, srgb);
               textures.push_back(std::move(texture));
 
               stbi_image_free(data);
@@ -777,7 +780,7 @@ static auto load_textures(const Context& ctx, const fastgltf::Asset& asset,
                 std::exit(1);
               }
 
-              auto texture = load_texture(ctx, data, width, height);
+              auto texture = load_texture(ctx, data, width, height, srgb);
               textures.push_back(std::move(texture));
 
               stbi_image_free(data);
@@ -803,7 +806,8 @@ static auto load_textures(const Context& ctx, const fastgltf::Asset& asset,
                           std::exit(1);
                         }
 
-                        auto texture = load_texture(ctx, data, width, height);
+                        auto texture =
+                            load_texture(ctx, data, width, height, srgb);
                         textures.push_back(std::move(texture));
 
                         stbi_image_free(data);
@@ -857,7 +861,20 @@ static auto load_gltf_scene(const Context& ctx, std::filesystem::path path)
     std::exit(1);
   }
 
-  auto textures = load_textures(ctx, asset.get(), path);
+  // Collect image indices used as base color or emissive (sRGB in glTF spec).
+  std::unordered_set<size_t> srgb_images;
+  for (const auto& mat : asset->materials) {
+    auto add = [&](const auto& tex_info) {
+      if (tex_info.has_value())
+        srgb_images.insert(
+            asset->textures[tex_info->textureIndex].imageIndex.value());
+    };
+    // based on glTF spec, base color and emission textures are sRGB
+    add(mat.pbrData.baseColorTexture);
+    add(mat.emissiveTexture);
+  }
+
+  auto textures = load_textures(ctx, asset.get(), path, srgb_images);
   printf("Loaded %zu texture(s)\n", textures.size());
 
   auto materials = load_materials(asset.get());
