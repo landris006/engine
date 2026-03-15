@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
 
   auto context = createContext();
 
-  auto scene = load_obj_scene(context, model_path);
+  auto scene = create_scene(context, model_path);
 
   vk::Extent2D extent{WINDOW_WIDHT, WINDOW_HEIGHT};
   auto rt = create_rt_pipeline(context, extent, scene, skybox_path);
