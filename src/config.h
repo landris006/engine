@@ -4,5 +4,5 @@
 
 #include <glm/glm.hpp>
 
-static const uint WINDOW_WIDHT = 1920;
-static const uint WINDOW_HEIGHT = 1200;
+static const uint WINDOW_WIDHT = 800;
+static const uint WINDOW_HEIGHT = 600;

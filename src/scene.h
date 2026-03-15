@@ -17,6 +17,7 @@
 #include <unordered_set>
 
 #include "context.h"
+#include "dds.h"
 #include "utils.h"
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -496,7 +497,7 @@ static auto build_tlas(const Context& ctx, const fastgltf::Asset& asset,
     uint32_t mat_idx = mesh_info[mesh_idx].material_index;
 
     if (materials[mat_idx].emissive_factor == glm::vec3(0) ||
-        materials[mat_idx].emissive_tex >= 0 /* skip emission maps for now */) {
+        materials[mat_idx].emissive_tex < 0 /* skip emission maps for now */) {
       continue;
     }
 
@@ -743,47 +744,70 @@ static auto load_textures(const Context& ctx, const fastgltf::Asset& asset,
             [&](const fastgltf::sources::URI& file_path) {
               // We don't support offsets with stbi.
               assert(file_path.fileByteOffset == 0);
-              // We're only capable of
-              // loading local files.
+              // We're only capable of loading local files.
               assert(file_path.uri.isLocalPath());
 
-              int width, height, nrChannels;
               auto parent_dir = std::filesystem::path(path).parent_path();
               std::string full_path = std::string(parent_dir) + "/" +
                                       std::string(file_path.uri.path().begin(),
                                                   file_path.uri.path().end());
 
-              unsigned char* data =
-                  stbi_load(full_path.c_str(), &width, &height, &nrChannels, 4);
+              auto ext = std::filesystem::path(full_path).extension().string();
+              for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
 
-              if (!data) {
-                fprintf(stderr, "stbi_load failed: %s\n",
-                        stbi_failure_reason());
-                std::exit(1);
+              if (ext == ".dds") {
+                FILE* f = fopen(full_path.c_str(), "rb");
+                if (!f) {
+                  fprintf(stderr, "fopen failed: %s\n", full_path.c_str());
+                  std::exit(1);
+                }
+                fseek(f, 0, SEEK_END);
+                size_t sz = (size_t)ftell(f);
+                rewind(f);
+                std::vector<uint8_t> buf(sz);
+                if (fread(buf.data(), 1, sz, f) != sz) {
+                  fprintf(stderr, "fread failed: %s\n", full_path.c_str());
+                  fclose(f);
+                  std::exit(1);
+                }
+                fclose(f);
+                textures.push_back(load_dds_texture(ctx, buf.data(), sz, srgb));
+              } else {
+                int width, height, nrChannels;
+                unsigned char* data = stbi_load(full_path.c_str(), &width,
+                                                &height, &nrChannels, 4);
+                if (!data) {
+                  fprintf(stderr, "stbi_load failed: %s\n",
+                          stbi_failure_reason());
+                  std::exit(1);
+                }
+                textures.push_back(
+                    load_texture(ctx, data, width, height, srgb));
+                stbi_image_free(data);
               }
-
-              auto texture = load_texture(ctx, data, width, height, srgb);
-              textures.push_back(std::move(texture));
-
-              stbi_image_free(data);
             },
             [&](const fastgltf::sources::Array& vector) {
-              int width, height, nrChannels;
-              unsigned char* data = stbi_load_from_memory(
-                  reinterpret_cast<const stbi_uc*>(vector.bytes.data()),
-                  static_cast<int>(vector.bytes.size()), &width, &height,
-                  &nrChannels, 4);
-
-              if (!data) {
-                fprintf(stderr, "stbi_load failed: %s\n",
-                        stbi_failure_reason());
-                std::exit(1);
+              const uint8_t* bytes =
+                  reinterpret_cast<const uint8_t*>(vector.bytes.data());
+              size_t sz = vector.bytes.size();
+              uint32_t magic = 0;
+              if (sz >= 4) memcpy(&magic, bytes, 4);
+              if (magic == DDS_MAGIC) {
+                textures.push_back(load_dds_texture(ctx, bytes, sz, srgb));
+              } else {
+                int width, height, nrChannels;
+                unsigned char* data = stbi_load_from_memory(
+                    reinterpret_cast<const stbi_uc*>(bytes),
+                    static_cast<int>(sz), &width, &height, &nrChannels, 4);
+                if (!data) {
+                  fprintf(stderr, "stbi_load failed: %s\n",
+                          stbi_failure_reason());
+                  std::exit(1);
+                }
+                auto texture = load_texture(ctx, data, width, height, srgb);
+                textures.push_back(std::move(texture));
+                stbi_image_free(data);
               }
-
-              auto texture = load_texture(ctx, data, width, height, srgb);
-              textures.push_back(std::move(texture));
-
-              stbi_image_free(data);
             },
             [&](const fastgltf::sources::BufferView& view) {
               auto& bufferView = asset.bufferViews[view.bufferViewIndex];

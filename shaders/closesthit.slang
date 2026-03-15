@@ -8,7 +8,7 @@ import types;
 
 [shader("closesthit")]
 void main(inout HitPayload payload, float2 attribs : SV_IntersectionAttributes) {
-  MeshInfo mesh = mesh_infos[InstanceIndex()];
+  MeshInfo mesh = mesh_infos[InstanceID()];
 
   Vertex* vertex_buffer = (Vertex*)mesh.vertex_address;
   uint*   vertex_index = (uint*)mesh.index_address;
@@ -52,8 +52,9 @@ void main(inout HitPayload payload, float2 attribs : SV_IntersectionAttributes) 
   float3 normal = world_normal;
   if (mat.normal_tex >= 0) {
     // tangent space normal
-    float3 normal_ts = textures[NonUniformResourceIndex(mat.normal_tex)].SampleLevel(uv, 0).xyz;
-    normal_ts = normal_ts * 2.0 - 1.0; // [0,1] -> [-1,1]
+    float4 normal_sample = textures[NonUniformResourceIndex(mat.normal_tex)].SampleLevel(uv, 0);
+    float2 xy = normal_sample.xy * 2.0 - 1.0;  // [0,1] -> [-1,1]
+    float3 normal_ts = float3(xy, sqrt(max(0.0, 1.0 - dot(xy, xy))));
     float3 bitangent = cross(world_normal, world_tang) * tangent.w;
     // transform normal from tangent space to world space
     normal = normalize(normal_ts.x * world_tang + normal_ts.y * bitangent + normal_ts.z * world_normal);
