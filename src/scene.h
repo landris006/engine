@@ -494,8 +494,8 @@ static auto build_tlas(const Context& ctx, const fastgltf::Asset& asset,
   for (auto& [mesh_idx, world] : instances) {
     uint32_t mat_idx = mesh_info[mesh_idx].material_index;
 
-    if (materials[mat_idx].emissive_factor == glm::vec3(0) &&
-        materials[mat_idx].emissive_tex < 0) {
+    if (materials[mat_idx].emissive_factor == glm::vec3(0) ||
+        materials[mat_idx].emissive_tex >= 0 /* skip emission maps for now */) {
       continue;
     }
 

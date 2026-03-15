@@ -130,6 +130,7 @@ static auto createContext() -> Context {
   auto descriptor_indexing =
       vk::PhysicalDeviceDescriptorIndexingFeatures()
           .setDescriptorBindingPartiallyBound(true)
+          .setDescriptorBindingVariableDescriptorCount(true)
           .setRuntimeDescriptorArray(true)
           .setShaderSampledImageArrayNonUniformIndexing(true)
           .setPNext(&dynamic_rendering_features);

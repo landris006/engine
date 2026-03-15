@@ -241,7 +241,9 @@ static auto create_rt_pipeline(const Context& context,
                      vk::ShaderStageFlagBits::eClosestHitKHR |
                      vk::ShaderStageFlagBits::eCompute;
 
-  std::array<vk::DescriptorSetLayoutBinding, 8> bindings = {{
+  uint32_t tex_count = std::max((uint32_t)scene.textures.size(), 1u);
+
+  std::array<vk::DescriptorSetLayoutBinding, 9> bindings = {{
       {0, vk::DescriptorType::eAccelerationStructureKHR, 1, stage_flags},
       {1, vk::DescriptorType::eStorageImage, 1, stage_flags},
       {2, vk::DescriptorType::eUniformBuffer, 1, stage_flags},
@@ -250,26 +252,39 @@ static auto create_rt_pipeline(const Context& context,
       {5, vk::DescriptorType::eStorageBuffer, 1, stage_flags},
       {6, vk::DescriptorType::eStorageImage, 1, stage_flags},
       {7, vk::DescriptorType::eCombinedImageSampler, 1, stage_flags},
+      {8, vk::DescriptorType::eCombinedImageSampler, tex_count, stage_flags},
   }};
 
+  std::array<vk::DescriptorBindingFlags, 9> binding_flags{};
+  binding_flags[8] = vk::DescriptorBindingFlagBits::ePartiallyBound |
+                     vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
+  auto flags_info =
+      vk::DescriptorSetLayoutBindingFlagsCreateInfo{}.setBindingFlags(
+          binding_flags);
+
   auto desc_layout = context.device->createDescriptorSetLayoutUnique(
-      vk::DescriptorSetLayoutCreateInfo{}.setBindings(bindings));
+      vk::DescriptorSetLayoutCreateInfo{}.setBindings(bindings).setPNext(
+          flags_info));
 
   std::array<vk::DescriptorPoolSize, 5> pool_sizes = {{
       {vk::DescriptorType::eAccelerationStructureKHR, 1},
       {vk::DescriptorType::eStorageImage, 2},
       {vk::DescriptorType::eUniformBuffer, 1},
       {vk::DescriptorType::eStorageBuffer, 3},
-      {vk::DescriptorType::eCombinedImageSampler, 1},
+      {vk::DescriptorType::eCombinedImageSampler, 1 + tex_count},
   }};
 
   auto desc_pool = context.device->createDescriptorPoolUnique(
       vk::DescriptorPoolCreateInfo{}.setMaxSets(1).setPoolSizes(pool_sizes));
 
+  auto var_infor = vk::DescriptorSetVariableDescriptorCountAllocateInfo()
+                       .setDescriptorCounts(tex_count);
+
   auto desc_set = context.device->allocateDescriptorSets(
       vk::DescriptorSetAllocateInfo{}
           .setDescriptorPool(desc_pool.get())
-          .setSetLayouts(desc_layout.get()))[0];
+          .setSetLayouts(desc_layout.get())
+          .setPNext(&var_infor))[0];
 
   vk::PushConstantRange pc_range{vk::ShaderStageFlagBits::eRaygenKHR, 0,
                                  sizeof(PushConstants)};
@@ -427,6 +442,22 @@ static auto create_rt_pipeline(const Context& context,
           .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
           .setMaxLod(vk::LodClampNone));
 
+  auto tex_infos = std::vector<vk::DescriptorImageInfo>();
+  tex_infos.reserve(tex_count);
+  for (auto& tex : scene.textures) {
+    tex_infos.emplace_back(
+        vk::DescriptorImageInfo()
+            .setSampler(context.linear_sampler.get())
+            .setImageView(tex.view.get())
+            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal));
+  }
+
+  if (tex_infos.empty()) {
+    // dummy
+    tex_infos.push_back({skybox_sampler.get(), skybox_image.view.get(),
+                         vk::ImageLayout::eShaderReadOnlyOptimal});
+  }
+
   vk::WriteDescriptorSetAccelerationStructureKHR tlas_info{};
   tlas_info.setAccelerationStructures(scene.tlas_handle.get());
 
@@ -453,63 +484,69 @@ static auto create_rt_pipeline(const Context& context,
           .setImageView(skybox_image.view.get())
           .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
 
-  std::array<vk::WriteDescriptorSet, 8> writes = {{
-      // TLAS
-      vk::WriteDescriptorSet{}
-          .setDstSet(desc_set)
-          .setDstBinding(0)
-          .setDescriptorType(vk::DescriptorType::eAccelerationStructureKHR)
-          .setDescriptorCount(1)
-          .setPNext(&tlas_info),
-      // Storage image
-      vk::WriteDescriptorSet{}
-          .setDstSet(desc_set)
-          .setDstBinding(1)
-          .setDescriptorType(vk::DescriptorType::eStorageImage)
-          .setDescriptorCount(1)
-          .setPImageInfo(&storage_image_info),
-      // Camera
-      vk::WriteDescriptorSet{}
-          .setDstSet(desc_set)
-          .setDstBinding(2)
-          .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-          .setDescriptorCount(1)
-          .setPBufferInfo(&camera_info),
-      // Mesh info
-      vk::WriteDescriptorSet{}
-          .setDstSet(desc_set)
-          .setDstBinding(3)
-          .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-          .setDescriptorCount(1)
-          .setPBufferInfo(&mesh_info),
-      // Materials
-      vk::WriteDescriptorSet{}
-          .setDstSet(desc_set)
-          .setDstBinding(4)
-          .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-          .setDescriptorCount(1)
-          .setPBufferInfo(&mat_info),
-      // Light triangles
-      vk::WriteDescriptorSet{}
-          .setDstSet(desc_set)
-          .setDstBinding(5)
-          .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-          .setDescriptorCount(1)
-          .setPBufferInfo(&light_buf_info),
-      vk::WriteDescriptorSet{}
-          .setDstSet(desc_set)
-          .setDstBinding(6)
-          .setDescriptorType(vk::DescriptorType::eStorageImage)
-          .setDescriptorCount(1)
-          .setPImageInfo(&display_image_info),
-      // Skybox
-      vk::WriteDescriptorSet{}
-          .setDstSet(desc_set)
-          .setDstBinding(7)
-          .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-          .setDescriptorCount(1)
-          .setPImageInfo(&skybox_info),
-  }};
+  std::array<vk::WriteDescriptorSet, 9> writes = {
+      {// TLAS
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(0)
+           .setDescriptorType(vk::DescriptorType::eAccelerationStructureKHR)
+           .setDescriptorCount(1)
+           .setPNext(&tlas_info),
+       // Storage image
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(1)
+           .setDescriptorType(vk::DescriptorType::eStorageImage)
+           .setDescriptorCount(1)
+           .setPImageInfo(&storage_image_info),
+       // Camera
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(2)
+           .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+           .setDescriptorCount(1)
+           .setPBufferInfo(&camera_info),
+       // Mesh info
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(3)
+           .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+           .setDescriptorCount(1)
+           .setPBufferInfo(&mesh_info),
+       // Materials
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(4)
+           .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+           .setDescriptorCount(1)
+           .setPBufferInfo(&mat_info),
+       // Light triangles
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(5)
+           .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+           .setDescriptorCount(1)
+           .setPBufferInfo(&light_buf_info),
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(6)
+           .setDescriptorType(vk::DescriptorType::eStorageImage)
+           .setDescriptorCount(1)
+           .setPImageInfo(&display_image_info),
+       // Skybox
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(7)
+           .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+           .setDescriptorCount(1)
+           .setPImageInfo(&skybox_info),
+       // Textures
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(8)
+           .setImageInfo(tex_infos)
+           .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+           .setDescriptorCount(tex_count)}};
 
   context.device->updateDescriptorSets(writes, {});
 
