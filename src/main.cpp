@@ -16,6 +16,7 @@
 #include <vulkan/vulkan.hpp>
 
 #include "camera.h"
+#include "ini.h"
 #include "config.h"
 #include "context.h"
 #include "rt_pipeline.h"
@@ -114,10 +115,13 @@ int main(int argc, char** argv) {
 
     uint32_t sample_count = 0;
 
+    auto ini = load_scene_ini();
     Camera cam;
-    cam.aspect = (float)swapchain.extent.width / (float)swapchain.extent.height;
-    cam.position = glm::vec3(0, 2, 10);
-    cam.yaw = glm::radians(-90.0f);
+    cam.aspect    = (float)swapchain.extent.width / (float)swapchain.extent.height;
+    cam.position  = ini.camera_pos;
+    cam.yaw       = glm::radians(ini.camera_yaw_deg);
+    cam.pitch     = glm::radians(ini.camera_pitch_deg);
+    cam.fov       = ini.camera_vfov_deg;
     FpsCameraController controller;
 
     double last_time = glfwGetTime();

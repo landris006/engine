@@ -1,6 +1,7 @@
 #include "config.h"
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "camera.h"
+#include "ini.h"
 #include "context.h"
 #include "rt_pipeline.h"
 #include "scene.h"
@@ -36,10 +37,13 @@ int main(int argc, char** argv) {
   vk::Extent2D extent{WINDOW_WIDHT, WINDOW_HEIGHT};
   auto rt = create_rt_pipeline(context, extent, scene, skybox_path);
 
+  auto ini = load_scene_ini();
   Camera cam;
-  cam.aspect = (float)extent.width / (float)extent.height;
-  cam.position = glm::vec3(0, 2, 10);
-  cam.yaw = glm::radians(-90.0f);
+  cam.aspect   = (float)extent.width / (float)extent.height;
+  cam.position = ini.camera_pos;
+  cam.yaw      = glm::radians(ini.camera_yaw_deg);
+  cam.pitch    = glm::radians(ini.camera_pitch_deg);
+  cam.fov      = ini.camera_vfov_deg;
   update_camera(context, rt, cam.create_ubo());
 
   printf("Rendering %u samples at %ux%u\n", num_samples, extent.width,

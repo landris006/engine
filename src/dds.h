@@ -3,12 +3,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <vector>
-
 #include <vulkan/vulkan.hpp>
 
 #include "context.h"
-#include "utils.h"
 
 #pragma pack(push, 1)
 struct DDSPixelFormat {
@@ -45,7 +42,7 @@ struct DdsInfo {
 };
 
 static bool parse_dds_header(const void* file_data, size_t file_size, bool srgb,
-                              DdsInfo* out) {
+                             DdsInfo* out) {
   const uint8_t* p = static_cast<const uint8_t*>(file_data);
   if (file_size < 4 + sizeof(DDSHeader)) return false;
   uint32_t magic;
@@ -96,7 +93,7 @@ static bool parse_dds_header(const void* file_data, size_t file_size, bool srgb,
 }
 
 static auto load_dds_texture(const Context& ctx, const void* file_data,
-                              size_t file_size, bool srgb) -> AllocatedImage {
+                             size_t file_size, bool srgb) -> AllocatedImage {
   DdsInfo info;
   if (!parse_dds_header(file_data, file_size, srgb, &info)) {
     fprintf(stderr, "load_dds_texture: failed to parse DDS header\n");
@@ -111,46 +108,43 @@ static auto load_dds_texture(const Context& ctx, const void* file_data,
                        vk::MemoryPropertyFlagBits::eHostCoherent);
   uploadToBuffer(ctx, staging, pixels, info.data_size);
 
-  auto img = createImage(ctx, vk::Extent3D{info.width, info.height, 1},
-                         info.vk_format,
-                         vk::ImageUsageFlagBits::eTransferDst |
-                             vk::ImageUsageFlagBits::eSampled);
+  auto img = createImage(
+      ctx, vk::Extent3D{info.width, info.height, 1}, info.vk_format,
+      vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled);
 
   submit_one_time_command(ctx, [&](const vk::CommandBuffer& cmd) {
-    auto subresource_range =
-        vk::ImageSubresourceRange()
-            .setAspectMask(vk::ImageAspectFlagBits::eColor)
-            .setBaseMipLevel(0)
-            .setLevelCount(1)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1);
+    auto subresource_range = vk::ImageSubresourceRange()
+                                 .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                                 .setBaseMipLevel(0)
+                                 .setLevelCount(1)
+                                 .setBaseArrayLayer(0)
+                                 .setLayerCount(1);
 
-    auto barrier =
-        vk::ImageMemoryBarrier()
-            .setOldLayout(vk::ImageLayout::eUndefined)
-            .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
-            .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
-            .setDstQueueFamilyIndex(vk::QueueFamilyIgnored)
-            .setImage(img.handle.get())
-            .setSubresourceRange(subresource_range)
-            .setSrcAccessMask({})
-            .setDstAccessMask(vk::AccessFlagBits::eTransferWrite);
+    auto barrier = vk::ImageMemoryBarrier()
+                       .setOldLayout(vk::ImageLayout::eUndefined)
+                       .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+                       .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
+                       .setDstQueueFamilyIndex(vk::QueueFamilyIgnored)
+                       .setImage(img.handle.get())
+                       .setSubresourceRange(subresource_range)
+                       .setSrcAccessMask({})
+                       .setDstAccessMask(vk::AccessFlagBits::eTransferWrite);
     cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
                         vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
                         barrier);
 
-    auto copy =
-        vk::BufferImageCopy()
-            .setBufferOffset(0)
-            .setBufferRowLength(0)
-            .setBufferImageHeight(0)
-            .setImageSubresource(vk::ImageSubresourceLayers()
-                                     .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                                     .setMipLevel(0)
-                                     .setBaseArrayLayer(0)
-                                     .setLayerCount(1))
-            .setImageOffset({0, 0, 0})
-            .setImageExtent({info.width, info.height, 1});
+    auto copy = vk::BufferImageCopy()
+                    .setBufferOffset(0)
+                    .setBufferRowLength(0)
+                    .setBufferImageHeight(0)
+                    .setImageSubresource(
+                        vk::ImageSubresourceLayers()
+                            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                            .setMipLevel(0)
+                            .setBaseArrayLayer(0)
+                            .setLayerCount(1))
+                    .setImageOffset({0, 0, 0})
+                    .setImageExtent({info.width, info.height, 1});
     cmd.copyBufferToImage(staging.handle.get(), img.handle.get(),
                           vk::ImageLayout::eTransferDstOptimal, copy);
 
