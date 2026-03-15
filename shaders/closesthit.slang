@@ -24,17 +24,20 @@ void main(inout HitPayload payload, float2 attribs : SV_IntersectionAttributes) 
 
   Material mat = materials[mesh.material_index];
 
+  float3x3 obj_to_world = (float3x3)ObjectToWorld3x4();
+  float3 world_normal = normalize(mul(obj_to_world, normal));
+
   float3 world_pos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
 
-  payload.albedo      = mat.albedo;
-  payload.emissive    = mat.emissive;
-  payload.normal      = normal;
-  payload.next_origin = world_pos + normal * 0.001;
+  payload.albedo      = mat.base_color_factor.xyz;
+  payload.emissive    = mat.emissive_factor;
+  payload.normal      = world_normal;
+  payload.next_origin = world_pos + world_normal * 0.001;
   payload.hit_dist    = RayTCurrent();
-  payload.metallic    = mat.metallic;
-  payload.roughness   = mat.roughness;
+  payload.metallic    = mat.metallic_factor;
+  payload.roughness   = mat.roughness_factor;
 
-  if (length(mat.emissive) > 0.0) {
+  if (length(mat.emissive_factor) > 0.0) {
     float3 e1 = v1.pos - v0.pos;
     float3 e2 = v2.pos - v0.pos;
     payload.light_area = length(cross(e1, e2)) * 0.5;

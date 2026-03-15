@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <functional>
 
+#include "vulkan/vulkan.hpp"
+
 #ifndef HEADLESS
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -18,7 +20,7 @@ static const char* rt_extensions[] = {
     vk::KHRRayTracingPipelineExtensionName,
     vk::KHRAccelerationStructureExtensionName,
     vk::KHRDeferredHostOperationsExtensionName,
-};
+    vk::EXTDescriptorIndexingExtensionName};
 
 struct AllocatedImage {
   vk::UniqueImage handle;
@@ -39,6 +41,7 @@ struct Context {
   vk::UniqueCommandPool command_pool;
   vk::Queue graphics_queue;
   uint32_t graphics_queue_idx;
+  vk::UniqueSampler linear_sampler;
 };
 
 static auto createContext() -> Context {
@@ -124,6 +127,12 @@ static auto createContext() -> Context {
   auto dynamic_rendering_features = vk::PhysicalDeviceDynamicRenderingFeatures()
                                         .setDynamicRendering(true)
                                         .setPNext(&rt_features);
+  auto descriptor_indexing =
+      vk::PhysicalDeviceDescriptorIndexingFeatures()
+          .setDescriptorBindingPartiallyBound(true)
+          .setRuntimeDescriptorArray(true)
+          .setShaderSampledImageArrayNonUniformIndexing(true)
+          .setPNext(&dynamic_rendering_features);
 
   auto features = vk::PhysicalDeviceFeatures().setShaderInt64(true);
 
@@ -138,7 +147,7 @@ static auto createContext() -> Context {
           .setPEnabledFeatures(&features)
           .setQueueCreateInfos(queue_create_info)
           .setPEnabledExtensionNames(device_exts)
-          .setPNext(&dynamic_rendering_features));
+          .setPNext(&descriptor_indexing));
 
   VULKAN_HPP_DEFAULT_DISPATCHER.init(device.get());
 
@@ -154,13 +163,23 @@ static auto createContext() -> Context {
           .setQueueFamilyIndex(chosen_index)
           .setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer));
 
-  return ::Context{
+  auto linear_sampler = device->createSamplerUnique(
+      vk::SamplerCreateInfo()
+          .setMagFilter(vk::Filter::eLinear)
+          .setMinFilter(vk::Filter::eLinear)
+          .setAddressModeU(vk::SamplerAddressMode::eRepeat)
+          .setAddressModeV(vk::SamplerAddressMode::eRepeat)
+          .setAddressModeW(vk::SamplerAddressMode::eRepeat)
+          .setMaxLod(vk::LodClampNone));
+
+  return Context{
       .instance = std::move(instance),
       .physical_device = selected_device,
       .device = std::move(device),
       .command_pool = std::move(command_pool),
       .graphics_queue = graphics_queue,
       .graphics_queue_idx = chosen_index,
+      .linear_sampler = std::move(linear_sampler),
   };
 }
 

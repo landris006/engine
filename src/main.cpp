@@ -90,6 +90,8 @@ int main(int argc, char** argv) {
     ImGui_ImplVulkan_Init(&init_info);
 
     auto scene = create_scene(context, model_path);
+
+    // auto scene = load_obj_scene(context, model_path);
     auto rt_pipeline =
         create_rt_pipeline(context, swapchain.extent, scene, skybox_path);
 

@@ -11,13 +11,20 @@ using float4 = glm::vec4;
 struct Vertex {
   float3 pos;
   float3 normal;
+  float2 uv;
+  float4 tangent;
 };
 
 struct Material {
-  float3 albedo;
-  float3 emissive;
-  float metallic;
-  float roughness;
+  float4 base_color_factor;
+  float3 emissive_factor;
+  float metallic_factor;
+  float roughness_factor;
+  int32_t base_color_tex;
+  int32_t metal_rough_tex;
+  int32_t normal_tex;
+  int32_t emissive_tex;
+  uint32_t pad[3];
 };
 
 struct MeshInfo {
@@ -51,9 +58,12 @@ struct PushConstants {
 };
 
 #ifdef __cplusplus
-static_assert(sizeof(Vertex) == 24);
-static_assert(sizeof(Material) == 32);
-static_assert(offsetof(Material, metallic) == 24);
+static_assert(sizeof(Vertex) == 48);
+static_assert(offsetof(Vertex, uv) == 24);
+static_assert(offsetof(Vertex, tangent) == 32);
+
+static_assert(sizeof(Material) == 64);
+
 static_assert(sizeof(MeshInfo) == 24);
 static_assert(sizeof(CameraUbo) == 64);
 static_assert(sizeof(LightTriangle) == 56);

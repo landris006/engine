@@ -136,7 +136,7 @@ void main() {
           float  pdf_brdf_nee = pdf_bsdf(payload.albedo, payload.metallic, payload.roughness,
                                          V_curr, light_dir, payload.normal);
           float  w_nee        = power_heuristic(pdf_light, pdf_brdf_nee);
-          radiance += throughput * lmat.emissive * bsdf_nee * w_nee / pdf_light;
+          radiance += throughput * lmat.emissive_factor * bsdf_nee * w_nee / pdf_light;
         }
       }
     }

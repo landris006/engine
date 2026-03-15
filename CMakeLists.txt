@@ -26,6 +26,8 @@ add_library(imgui STATIC
 target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(imgui PRIVATE Vulkan::Vulkan glfw)
 
+add_subdirectory(external/fastgltf)
+
 # Main Executable
 add_executable(engine src/main.cpp)
 
@@ -33,13 +35,14 @@ target_include_directories(engine PRIVATE src external ${SLANG_INCLUDE_DIR})
 
 target_link_libraries(engine PRIVATE
     Vulkan::Vulkan
+    fastgltf::fastgltf
     glfw
     imgui
     glm::glm
     ${SLANG_LIB}
 )
 
-target_compile_options(engine PRIVATE -Wmissing-field-initializers)
+target_compile_options(engine PRIVATE -Wno-missing-field-initializers -Wunused-parameter)
 
 target_compile_definitions(engine PRIVATE
   $<$<CONFIG:Debug>:DEBUG>
@@ -53,11 +56,12 @@ target_include_directories(engine_headless PRIVATE src external ${SLANG_INCLUDE_
 
 target_link_libraries(engine_headless PRIVATE
     Vulkan::Vulkan
+    fastgltf::fastgltf
     glm::glm
     ${SLANG_LIB}
 )
 
-target_compile_options(engine_headless PRIVATE -Wno-missing-field-initializers)
+target_compile_options(engine_headless PRIVATE -Wno-missing-field-initializers -Wunused-parameter)
 
 target_compile_definitions(engine_headless PRIVATE
     HEADLESS

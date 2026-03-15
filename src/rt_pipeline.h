@@ -5,9 +5,6 @@
 
 #include <optional>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include <stbimage/stb_image.h>
-
 #include "context.h"
 #include "scene.h"
 
