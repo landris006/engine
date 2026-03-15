@@ -16,9 +16,9 @@
 #include <vulkan/vulkan.hpp>
 
 #include "camera.h"
-#include "ini.h"
 #include "config.h"
 #include "context.h"
+#include "ini.h"
 #include "rt_pipeline.h"
 #include "swapchain.h"
 
@@ -116,12 +116,14 @@ int main(int argc, char** argv) {
     uint32_t sample_count = 0;
 
     auto ini = load_scene_ini();
-    Camera cam;
-    cam.aspect    = (float)swapchain.extent.width / (float)swapchain.extent.height;
-    cam.position  = ini.camera_pos;
-    cam.yaw       = glm::radians(ini.camera_yaw_deg);
-    cam.pitch     = glm::radians(ini.camera_pitch_deg);
-    cam.fov       = ini.camera_vfov_deg;
+    Camera cam{
+        .position = ini.camera_pos,
+        .yaw = glm::radians(ini.camera_yaw_deg),
+        .pitch = glm::radians(ini.camera_pitch_deg),
+        .fov = ini.camera_vfov_deg,
+        .aspect =
+            (float)swapchain.extent.width / (float)swapchain.extent.height,
+    };
     FpsCameraController controller;
 
     double last_time = glfwGetTime();
@@ -179,6 +181,24 @@ int main(int argc, char** argv) {
       if (controller.update(cam, window, dt)) {
         sample_count = 0;
       }
+
+      static bool ctrl_s_prev = false;
+      bool ctrl_s_now =
+          (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+           glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS) &&
+          glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS;
+      if (ctrl_s_now && !ctrl_s_prev) {
+        SceneConfig cfg;
+        cfg.camera_pos = cam.position;
+        cfg.camera_yaw_deg = glm::degrees(cam.yaw);
+        cfg.camera_pitch_deg = glm::degrees(cam.pitch);
+        cfg.camera_vfov_deg = cam.fov;
+        if (save_scene_ini(cfg)) {
+          printf("Scene config saved\n");
+        };
+      }
+      ctrl_s_prev = ctrl_s_now;
+
       update_camera(context, rt_pipeline, cam.create_ubo());
 
       vk_check((VkResult)context.device->waitForFences(
@@ -203,7 +223,7 @@ int main(int argc, char** argv) {
         // push constants
         sample_count++;
         PushConstants pc{.sample_count = sample_count,
-                         .max_bounces = 4,
+                         .max_bounces = 1,
                          .time = (float)glfwGetTime(),
                          .light_count = scene.light_count};
         buf->pushConstants(rt_pipeline.layout.get(),
