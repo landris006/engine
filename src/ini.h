@@ -59,3 +59,23 @@ static SceneConfig load_scene_ini(const char* path = "scene.ini") {
 
   return cfg;
 }
+
+static bool save_scene_ini(const SceneConfig& cfg,
+                           const char* path = "scene.ini") {
+  std::ofstream file(path);
+
+  if (!file.is_open()) {
+    return false;
+  }
+
+  file << "[camera]\n";
+
+  file << "pos=" << cfg.camera_pos.x << "," << cfg.camera_pos.y << ","
+       << cfg.camera_pos.z << "\n";
+
+  file << "pitch=" << cfg.camera_pitch_deg << "\n";
+  file << "yaw=" << cfg.camera_yaw_deg << "\n";
+  file << "vfov=" << cfg.camera_vfov_deg << "\n";
+
+  return true;
+}
