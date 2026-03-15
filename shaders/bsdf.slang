@@ -76,7 +76,8 @@ float3 eval_bsdf(float3 albedo, float metallic, float roughness,
   float  D      = ggx_D(NdotH, alpha2);
   float  G      = ggx_G2(NdotV, NdotL, alpha2);
 
-  float3 specular = D * G * F / (4.0 * NdotV);
+  // Cook-Torrance microfacet model
+  float3 specular = D * G * F / (4.0 * NdotV * NdotL);
   float3 diffuse  = albedo * (1.0 - metallic) * (1.0 - F) / PI;
 
   return (diffuse + specular) * NdotL;
