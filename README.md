@@ -3,4 +3,6 @@
 - 1 sample per pixel, 4 bounces, 1000 samples (yes, it can do offline too)
 ![output](renders/output.png)
 - same as above but with a directional light
-![output](renders/dir_light.png)
+![dir_light](renders/dir_light.png)
+- same as above, 4000 samples
+![dir_light_4k](renders/dir_light_4k.png)
