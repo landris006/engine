@@ -223,7 +223,7 @@ int main(int argc, char** argv) {
         // push constants
         sample_count++;
         PushConstants pc{.sample_count = sample_count,
-                         .max_bounces = 1,
+                         .max_bounces = 4,
                          .time = (float)glfwGetTime(),
                          .light_count = scene.light_count};
         buf->pushConstants(rt_pipeline.layout.get(),

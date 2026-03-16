@@ -211,5 +211,13 @@ void main() {
   float4 prev = output_image[launch_id];
   float t = 1.0 / float(push_constants.sample_count);
 
+
+  // tone down if too bright
+  float lum = dot(radiance, float3(0.2126, 0.7152, 0.0722)); // ITU-R BT.709 luma coefficients
+  const float max_lum = 5.0;
+  if (lum > max_lum) {
+    radiance *= max_lum / lum;
+  }
+
   output_image[launch_id] = lerp(prev, float4(radiance, 1.0), t); // prev * (n-1)/n + new * 1/n
 }
