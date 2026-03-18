@@ -113,8 +113,6 @@ int main(int argc, char** argv) {
     };
     time_t last_shader_mtime = latest_mtime();
 
-    uint32_t sample_count = 0;
-
     auto ini = load_scene_ini();
     Camera cam{
         .position = ini.camera_pos,
@@ -134,6 +132,14 @@ int main(int argc, char** argv) {
     float avg_all = 0.0f;
     uint32_t avg_all_count = 0;
 
+    PushConstants pc = {
+        .sample_count = 0,
+        .max_bounces = 4,
+        .light_count = scene.light_count,
+        .dir_light = glm::vec3(0.554743, 0.741466, 0.377476),
+        .time = (float)glfwGetTime(),
+    };
+
     uint32_t current_frame = 0;
     while (!glfwWindowShouldClose(window)) {
       glfwPollEvents();
@@ -146,6 +152,8 @@ int main(int argc, char** argv) {
       frame_time_idx = (frame_time_idx + 1) % FRAME_TIME_HISTORY;
       avg_all_count = std::min(avg_all_count + 1, 500u);
       avg_all += (dt_ms - avg_all) / (float)avg_all_count;
+
+      pc.time = (float)now;
 
       float avg10 = 0.0f;
       for (int i = 1; i <= 10; i++)
@@ -160,11 +168,16 @@ int main(int argc, char** argv) {
 
       // --- ImGui windows go here ---
       ImGui::Begin("Debug");
-      ImGui::Text("Samples: %u", sample_count);
+      ImGui::Text("Samples: %u", pc.sample_count);
       ImGui::Text("Frame:   %6.2f ms  %5.0f fps", avg10, 1000.0f / avg10);
       ImGui::Text("Avg all: %6.2f ms  %5.0f fps", avg_all, 1000.0f / avg_all);
       ImGui::PlotLines("##frametimes", frame_times, FRAME_TIME_HISTORY,
                        frame_time_idx, nullptr, 0.0f, 50.0f, ImVec2(0, 60));
+
+      if (ImGui::SliderFloat3("Direction", glm::value_ptr(pc.dir_light), -1.0f,
+                              1.0f)) {
+        pc.sample_count = 0;
+      }
       ImGui::End();
 
       ImGui::Render();
@@ -174,12 +187,12 @@ int main(int argc, char** argv) {
         last_shader_mtime = current_mtime;
         context.device->waitIdle();
         if (reload_pipeline(context, rt_pipeline)) {
-          sample_count = 0;
+          pc.sample_count = 0;
         }
       }
 
       if (controller.update(cam, window, dt)) {
-        sample_count = 0;
+        pc.sample_count = 0;
       }
 
       static bool ctrl_s_prev = false;
@@ -221,11 +234,7 @@ int main(int argc, char** argv) {
             vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
 
         // push constants
-        sample_count++;
-        PushConstants pc{.sample_count = sample_count,
-                         .max_bounces = 4,
-                         .time = (float)glfwGetTime(),
-                         .light_count = scene.light_count};
+        pc.sample_count++;
         buf->pushConstants(rt_pipeline.layout.get(),
                            vk::ShaderStageFlagBits::eRaygenKHR, 0, sizeof(pc),
                            &pc);

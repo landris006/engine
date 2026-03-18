@@ -1,8 +1,8 @@
 #include "config.h"
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "camera.h"
-#include "ini.h"
 #include "context.h"
+#include "ini.h"
 #include "rt_pipeline.h"
 #include "scene.h"
 
@@ -39,11 +39,11 @@ int main(int argc, char** argv) {
 
   auto ini = load_scene_ini();
   Camera cam;
-  cam.aspect   = (float)extent.width / (float)extent.height;
+  cam.aspect = (float)extent.width / (float)extent.height;
   cam.position = ini.camera_pos;
-  cam.yaw      = glm::radians(ini.camera_yaw_deg);
-  cam.pitch    = glm::radians(ini.camera_pitch_deg);
-  cam.fov      = ini.camera_vfov_deg;
+  cam.yaw = glm::radians(ini.camera_yaw_deg);
+  cam.pitch = glm::radians(ini.camera_pitch_deg);
+  cam.fov = ini.camera_vfov_deg;
   update_camera(context, rt, cam.create_ubo());
 
   printf("Rendering %u samples at %ux%u\n", num_samples, extent.width,
@@ -54,8 +54,9 @@ int main(int argc, char** argv) {
       PushConstants pc{
           .sample_count = s,
           .max_bounces = 4,
-          .time = 0.0f,
           .light_count = scene.light_count,
+          .dir_light = glm::vec3(0.554743, 0.741466, 0.377476),
+          .time = 0.0f,
       };
       buf.pushConstants(rt.layout.get(), vk::ShaderStageFlagBits::eRaygenKHR, 0,
                         sizeof(pc), &pc);

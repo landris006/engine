@@ -158,6 +158,7 @@ void main() {
       float3 sky_dir  = cosine_hemisphere(seed, payload.normal);
       float  cos_surf = max(dot(sky_dir, payload.normal), 0.0);
       float  pdf_sky  = cos_surf / PI;
+
       if (pdf_sky > 0.0) {
         ShadowPayload sp;
         sp.occluded = true;
@@ -181,6 +182,31 @@ void main() {
     }
 
     float3 V = -dir;
+
+    // Direct light
+    float3 L = normalize(push_constants.dir_light);
+    float cos_surf  = max(dot(L, payload.normal), 0.0);
+
+    if (cos_surf > 0.0) {
+      ShadowPayload sp;
+      sp.occluded = true;
+      RayDesc sr;
+      sr.Origin    = payload.next_origin;
+      sr.Direction = L;
+      sr.TMin      = 0.0;
+      sr.TMax      = 1e9;
+      TraceRay(tlas, 0x0Cu, 0xFF, 0, 1, 1, sr, sp);
+      if (!sp.occluded) {
+        float3 light_radiance = float3(1.0);
+
+        float3 bsdf = eval_bsdf(payload.albedo, payload.metallic, payload.roughness,
+                                V, L, payload.normal);
+
+        radiance += throughput * light_radiance * bsdf;
+      }
+
+    }
+
     float3 brdf_weight;
     dir = sample_bsdf(seed, V, payload.normal,
                       payload.albedo, payload.metallic, payload.roughness,

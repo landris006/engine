@@ -53,8 +53,9 @@ struct LightTriangle {
 struct PushConstants {
   uint32_t sample_count;
   uint32_t max_bounces;
-  float time;
   uint32_t light_count;
+  float3 dir_light;
+  float time;
 };
 
 #ifdef __cplusplus
@@ -67,5 +68,5 @@ static_assert(sizeof(Material) == 64);
 static_assert(sizeof(MeshInfo) == 24);
 static_assert(sizeof(CameraUbo) == 64);
 static_assert(sizeof(LightTriangle) == 56);
-static_assert(sizeof(PushConstants) == 16);
+static_assert(sizeof(PushConstants) == 28);
 #endif
