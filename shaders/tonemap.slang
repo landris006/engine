@@ -14,14 +14,15 @@ void main(uint2 globalThreadID: SV_DispatchThreadID)
   }
 
   float4 color = in_image[globalThreadID.xy];
+  float3 rgb = color.rgb;
 
   static const float exposure = 1.0;
-  color *= exposure;
+  rgb *= exposure;
 
-  // color = color / (color + float4(1.0)); // Reinhard
-  color = (color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14);  // ACES
+  // rgb = rgb / (rgb + float4(1.0)); // Reinhard
+  rgb = (rgb * (2.51 * rgb + 0.03)) / (rgb * (2.43 * rgb + 0.59) + 0.14);  // ACES
 
-  color = pow(color, 1.0 / 2.2);  // gamma correction
+  rgb = pow(rgb, 1.0 / 2.2);  // gamma correction
 
-  out_image[globalThreadID.xy] = color;
+  out_image[globalThreadID.xy] = float4(rgb, color.a);
 }
