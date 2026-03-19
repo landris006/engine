@@ -1,4 +1,4 @@
-# Feature Roadmap: Path Tracer Learning
+# TODO
 
 ## Auto-exposure
 - Luminance Histogram (Compute Pass 1): A compute shader reads your HDR in_image and tallies up the brightness of every pixel into a histogram buffer. We use a histogram instead of a simple average so a few ultra-bright pixels (like looking directly at the sun) don't plunge the rest of the screen into pitch blackness.
@@ -17,6 +17,10 @@
 - Sample ray origin on a disk (aperture), aim at focus plane
 - Pure camera change, no BRDF involved
 - Files: `raygen.slang`, `camera.h`
+
+## Fix lights
+- 1 NEE sample for 10k+ lights does nothing
+- AS maybe
 
 ## OIDN denoiser
 **Learns:** post-process integration, denoising buffers (albedo, normal AOVs)
