@@ -1,0 +1,673 @@
+#include "rt_pipeline.h"
+
+#include <slang-com-ptr.h>
+#include <slang.h>
+#include <stbimage/stb_image.h>
+
+#include <cstdio>
+#include <cstdlib>
+
+static auto create_storage_image(const Context& context,
+                                 const vk::Extent2D extent) -> AllocatedImage {
+  auto image = createImage(
+      context, vk::Extent3D(extent.width, extent.height, 1),
+      vk::Format::eR32G32B32A32Sfloat,
+      vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc |
+          vk::ImageUsageFlagBits::eTransferDst);
+
+  submit_one_time_command(context, [&](const vk::CommandBuffer& buf) {
+    auto barrier = vk::ImageMemoryBarrier()
+                       .setOldLayout(vk::ImageLayout::eUndefined)
+                       .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+                       .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
+                       .setDstQueueFamilyIndex(vk::QueueFamilyIgnored)
+                       .setImage(image.handle.get())
+                       .setSubresourceRange(
+                           vk::ImageSubresourceRange()
+                               .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                               .setBaseMipLevel(0)
+                               .setLevelCount(1)
+                               .setBaseArrayLayer(0)
+                               .setLayerCount(1))
+                       .setSrcAccessMask({})
+                       .setDstAccessMask({});
+    buf.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                        vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
+                        barrier);
+
+    auto subresource_range = vk::ImageSubresourceRange()
+                                 .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                                 .setBaseMipLevel(0)
+                                 .setLevelCount(1)
+                                 .setBaseArrayLayer(0)
+                                 .setLayerCount(1);
+    auto color = vk::ClearColorValue{0.0f, 0.0f, 0.0f, 0.0f};
+    buf.clearColorImage(image.handle.get(),
+                        vk::ImageLayout::eTransferDstOptimal, &color, 1,
+                        &subresource_range);
+
+    barrier.setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite);
+    buf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                        vk::PipelineStageFlagBits::eRayTracingShaderKHR, {}, {},
+                        {}, barrier);
+  });
+
+  return image;
+}
+
+static auto load_skybox_image(const Context& ctx, const char* path)
+    -> AllocatedImage {
+  int w = 1, h = 1, ch = 0;
+  float* data = nullptr;
+  bool loaded = false;
+
+  if (path) {
+    printf("Loading skybox from '%s'...\n", path);
+    data = stbi_loadf(path, &w, &h, &ch, 4);
+    if (data) {
+      loaded = true;
+    } else {
+      fprintf(stderr,
+              "[stb_image]: Failed to load '%s', using white fallback\n", path);
+    }
+  }
+  float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  if (!loaded) {
+    data = white;
+  }
+
+  vk::DeviceSize size = (vk::DeviceSize)(w * h * 4 * sizeof(float));
+  auto staging = createBuffer(ctx, size, vk::BufferUsageFlagBits::eTransferSrc,
+                              vk::MemoryPropertyFlagBits::eHostVisible |
+                                  vk::MemoryPropertyFlagBits::eHostCoherent);
+  uploadToBuffer(ctx, staging, data, size);
+  if (loaded) {
+    stbi_image_free(data);
+  }
+
+  auto img = createImage(
+      ctx, vk::Extent3D{(uint32_t)w, (uint32_t)h, 1},
+      vk::Format::eR32G32B32A32Sfloat,
+      vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled);
+
+  submit_one_time_command(ctx, [&](const vk::CommandBuffer& cmd) {
+    auto subresource_range = vk::ImageSubresourceRange()
+                                 .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                                 .setBaseMipLevel(0)
+                                 .setLevelCount(1)
+                                 .setBaseArrayLayer(0)
+                                 .setLayerCount(1);
+
+    auto barrier = vk::ImageMemoryBarrier()
+                       .setOldLayout(vk::ImageLayout::eUndefined)
+                       .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+                       .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
+                       .setDstQueueFamilyIndex(vk::QueueFamilyIgnored)
+                       .setImage(img.handle.get())
+                       .setSubresourceRange(subresource_range)
+                       .setSrcAccessMask({})
+                       .setDstAccessMask(vk::AccessFlagBits::eTransferWrite);
+    cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                        vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
+                        barrier);
+
+    auto copy = vk::BufferImageCopy()
+                    .setBufferOffset(0)
+                    .setBufferRowLength(0)
+                    .setBufferImageHeight(0)
+                    .setImageSubresource(
+                        vk::ImageSubresourceLayers()
+                            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                            .setMipLevel(0)
+                            .setBaseArrayLayer(0)
+                            .setLayerCount(1))
+                    .setImageOffset({0, 0, 0})
+                    .setImageExtent({(uint32_t)w, (uint32_t)h, 1});
+    cmd.copyBufferToImage(staging.handle.get(), img.handle.get(),
+                          vk::ImageLayout::eTransferDstOptimal, copy);
+
+    barrier.setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+    cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                        vk::PipelineStageFlagBits::eRayTracingShaderKHR, {}, {},
+                        {}, barrier);
+  });
+
+  return img;
+}
+
+static auto compile_slang(const Context& ctx, const char* file,
+                          const char* entry_name)
+    -> std::optional<vk::UniqueShaderModule> {
+  Slang::ComPtr<slang::IGlobalSession> global_session;
+  slang::createGlobalSession(global_session.writeRef());
+
+  slang::TargetDesc target_desc{
+      .format = SLANG_SPIRV,
+      .profile = global_session->findProfile("spirv_1_5"),
+      .forceGLSLScalarBufferLayout = true,
+  };
+
+  const char* search_paths[] = {"shaders", "src"};
+
+  slang::SessionDesc session_desc{.targets = &target_desc,
+                                  .targetCount = 1,
+                                  .searchPaths = search_paths,
+                                  .searchPathCount = 2};
+
+  Slang::ComPtr<slang::ISession> session;
+  global_session->createSession(session_desc, session.writeRef());
+
+  Slang::ComPtr<slang::IBlob> diagnostics;
+  auto* module = session->loadModule(file, diagnostics.writeRef());
+
+  if (diagnostics) {
+    fprintf(stderr, "[slang]: %s\n", (char*)diagnostics->getBufferPointer());
+  }
+
+  if (!module) {
+    fprintf(stderr, "[slang]: Failed to load module '%s'\n", file);
+    return std::nullopt;
+  }
+
+  Slang::ComPtr<slang::IEntryPoint> entry_point;
+  module->findEntryPointByName(entry_name, entry_point.writeRef());
+  if (!entry_point) {
+    fprintf(stderr, "[slang]: Failed to find entry point '%s' in '%s'\n",
+            entry_name, file);
+    return std::nullopt;
+  };
+
+  slang::IComponentType* components[] = {module, entry_point.get()};
+  Slang::ComPtr<slang::IComponentType> composite;
+  session->createCompositeComponentType(components, 2, composite.writeRef());
+
+  Slang::ComPtr<slang::IComponentType> linked;
+  composite->link(linked.writeRef(), diagnostics.writeRef());
+  if (diagnostics) {
+    fprintf(stderr, "[slang]: %s\n", (char*)diagnostics->getBufferPointer());
+  }
+
+  Slang::ComPtr<slang::IBlob> code;
+  linked->getEntryPointCode(0, 0, code.writeRef(), diagnostics.writeRef());
+  if (diagnostics) {
+    fprintf(stderr, "[slang]: %s\n", (char*)diagnostics->getBufferPointer());
+  }
+
+  return ctx.device->createShaderModuleUnique(
+      vk::ShaderModuleCreateInfo{}
+          .setCodeSize(code->getBufferSize())
+          .setPCode((uint32_t*)code->getBufferPointer()));
+}
+
+RtPipeline create_rt_pipeline(const Context& context, vk::Extent2D extent,
+                              const Scene& scene, const char* skybox_path) {
+  auto storage_image = create_storage_image(context, extent);
+  auto display_image = create_storage_image(context, extent);
+
+  auto stage_flags = vk::ShaderStageFlagBits::eRaygenKHR |
+                     vk::ShaderStageFlagBits::eMissKHR |
+                     vk::ShaderStageFlagBits::eClosestHitKHR |
+                     vk::ShaderStageFlagBits::eCompute;
+
+  uint32_t tex_count = std::max((uint32_t)scene.textures.size(), 1u);
+
+  std::array<vk::DescriptorSetLayoutBinding, 9> bindings = {{
+      {0, vk::DescriptorType::eAccelerationStructureKHR, 1, stage_flags},
+      {1, vk::DescriptorType::eStorageImage, 1, stage_flags},
+      {2, vk::DescriptorType::eUniformBuffer, 1, stage_flags},
+      {3, vk::DescriptorType::eStorageBuffer, 1, stage_flags},
+      {4, vk::DescriptorType::eStorageBuffer, 1, stage_flags},
+      {5, vk::DescriptorType::eStorageBuffer, 1, stage_flags},
+      {6, vk::DescriptorType::eStorageImage, 1, stage_flags},
+      {7, vk::DescriptorType::eCombinedImageSampler, 1, stage_flags},
+      {8, vk::DescriptorType::eCombinedImageSampler, tex_count, stage_flags},
+  }};
+
+  std::array<vk::DescriptorBindingFlags, 9> binding_flags{};
+  binding_flags[8] = vk::DescriptorBindingFlagBits::ePartiallyBound |
+                     vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
+  auto flags_info =
+      vk::DescriptorSetLayoutBindingFlagsCreateInfo{}.setBindingFlags(
+          binding_flags);
+
+  auto desc_layout = context.device->createDescriptorSetLayoutUnique(
+      vk::DescriptorSetLayoutCreateInfo{}.setBindings(bindings).setPNext(
+          flags_info));
+
+  std::array<vk::DescriptorPoolSize, 5> pool_sizes = {{
+      {vk::DescriptorType::eAccelerationStructureKHR, 1},
+      {vk::DescriptorType::eStorageImage, 2},
+      {vk::DescriptorType::eUniformBuffer, 1},
+      {vk::DescriptorType::eStorageBuffer, 3},
+      {vk::DescriptorType::eCombinedImageSampler, 1 + tex_count},
+  }};
+
+  auto desc_pool = context.device->createDescriptorPoolUnique(
+      vk::DescriptorPoolCreateInfo{}.setMaxSets(1).setPoolSizes(pool_sizes));
+
+  auto var_infor = vk::DescriptorSetVariableDescriptorCountAllocateInfo()
+                       .setDescriptorCounts(tex_count);
+
+  auto desc_set = context.device->allocateDescriptorSets(
+      vk::DescriptorSetAllocateInfo{}
+          .setDescriptorPool(desc_pool.get())
+          .setSetLayouts(desc_layout.get())
+          .setPNext(&var_infor))[0];
+
+  vk::PushConstantRange pc_range{vk::ShaderStageFlagBits::eRaygenKHR, 0,
+                                 sizeof(PushConstants)};
+
+  auto layout = context.device->createPipelineLayoutUnique(
+      vk::PipelineLayoutCreateInfo{}
+          .setSetLayouts(desc_layout.get())
+          .setPushConstantRanges(pc_range));
+
+  auto raygen_module = compile_slang(context, "raygen", "main");
+  auto miss_module = compile_slang(context, "miss", "main");
+  auto shadow_module = compile_slang(context, "shadow_miss", "main");
+  auto closesthit_module = compile_slang(context, "closesthit", "main");
+  auto tonemap_module = compile_slang(context, "tonemap", "main");
+
+  if (!raygen_module || !miss_module || !shadow_module || !closesthit_module ||
+      !tonemap_module) {
+    std::abort();
+  }
+
+  // clang-format off
+  std::array<vk::PipelineShaderStageCreateInfo, 4> rt_stages = {{
+      {{}, vk::ShaderStageFlagBits::eRaygenKHR,     raygen_module->get(),     "main"},
+      {{}, vk::ShaderStageFlagBits::eMissKHR,       miss_module->get(),       "main"},
+      {{}, vk::ShaderStageFlagBits::eMissKHR,       shadow_module->get(),     "main"},
+      {{}, vk::ShaderStageFlagBits::eClosestHitKHR, closesthit_module->get(), "main"},
+  }};
+  // clang-format on
+
+  std::array<vk::RayTracingShaderGroupCreateInfoKHR, 4> groups = {{
+      vk::RayTracingShaderGroupCreateInfoKHR{}
+          .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
+          .setGeneralShader(0)
+          .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+          .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+          .setIntersectionShader(VK_SHADER_UNUSED_KHR),
+      vk::RayTracingShaderGroupCreateInfoKHR{}
+          .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
+          .setGeneralShader(1)
+          .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+          .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+          .setIntersectionShader(VK_SHADER_UNUSED_KHR),
+      vk::RayTracingShaderGroupCreateInfoKHR{}
+          .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
+          .setGeneralShader(2)
+          .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+          .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+          .setIntersectionShader(VK_SHADER_UNUSED_KHR),
+      vk::RayTracingShaderGroupCreateInfoKHR{}
+          .setType(vk::RayTracingShaderGroupTypeKHR::eTrianglesHitGroup)
+          .setGeneralShader(VK_SHADER_UNUSED_KHR)
+          .setClosestHitShader(3)
+          .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+          .setIntersectionShader(VK_SHADER_UNUSED_KHR),
+  }};
+
+  auto rt_pipeline_result = context.device->createRayTracingPipelineKHRUnique(
+      {}, {},
+      vk::RayTracingPipelineCreateInfoKHR{}
+          .setStages(rt_stages)
+          .setGroups(groups)
+          .setMaxPipelineRayRecursionDepth(2)
+          .setLayout(layout.get()));
+
+  if (rt_pipeline_result.result != vk::Result::eSuccess) {
+    fprintf(stderr, "[vulkan] Error: Failed to create ray tracing pipeline\n");
+    std::abort();
+  }
+
+  auto rt_pipeline = std::move(rt_pipeline_result.value);
+
+  auto tonemap_pipeline_result = context.device->createComputePipelineUnique(
+      vk::PipelineCache(),
+      vk::ComputePipelineCreateInfo()
+          .setStage(vk::PipelineShaderStageCreateInfo()
+                        .setStage(vk::ShaderStageFlagBits::eCompute)
+                        .setModule(tonemap_module->get())
+                        .setPName("main"))
+          .setLayout(layout.get()));
+
+  if (tonemap_pipeline_result.result != vk::Result::eSuccess) {
+    fprintf(stderr, "[vulkan] Error: Failed to create tonemap pipeline\n");
+    std::abort();
+  }
+
+  auto tonemap_pipeline = std::move(tonemap_pipeline_result.value);
+
+  auto rt_props =
+      context.physical_device
+          .getProperties2<vk::PhysicalDeviceProperties2,
+                          vk::PhysicalDeviceRayTracingPipelinePropertiesKHR>()
+          .get<vk::PhysicalDeviceRayTracingPipelinePropertiesKHR>();
+
+  uint32_t handle_size = rt_props.shaderGroupHandleSize;
+  uint32_t handle_align = rt_props.shaderGroupHandleAlignment;
+  uint32_t base_align = rt_props.shaderGroupBaseAlignment;
+
+  auto align_up = [](uint32_t val, uint32_t align) {
+    return (val + align - 1) & ~(align - 1);
+  };
+
+  uint32_t handle_stride = align_up(handle_size, handle_align);
+  uint32_t raygen_size = align_up(handle_stride, base_align);
+  uint32_t miss_size = align_up(handle_stride * 2, base_align);
+  uint32_t hit_size = align_up(handle_stride, base_align);
+  uint32_t total_size = raygen_size + miss_size + hit_size;
+
+  auto sbt_buffer =
+      createBuffer(context, total_size,
+                   vk::BufferUsageFlagBits::eShaderBindingTableKHR |
+                       vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                   vk::MemoryPropertyFlagBits::eHostVisible |
+                       vk::MemoryPropertyFlagBits::eHostCoherent);
+
+  auto handles = context.device->getRayTracingShaderGroupHandlesKHR<uint8_t>(
+      rt_pipeline.get(), 0, 4, 4 * handle_size);
+
+  {
+    auto* sbt = (uint8_t*)context.device->mapMemory(sbt_buffer.memory.get(), 0,
+                                                    total_size);
+    memcpy(sbt, handles.data() + 0 * handle_size, handle_size);
+    memcpy(sbt + raygen_size, handles.data() + 1 * handle_size, handle_size);
+    memcpy(sbt + raygen_size + handle_stride, handles.data() + 2 * handle_size,
+           handle_size);
+    memcpy(sbt + raygen_size + miss_size, handles.data() + 3 * handle_size,
+           handle_size);
+    context.device->unmapMemory(sbt_buffer.memory.get());
+  }
+
+  vk::StridedDeviceAddressRegionKHR raygen_region{sbt_buffer.address,
+                                                  raygen_size, raygen_size};
+  vk::StridedDeviceAddressRegionKHR miss_region{
+      sbt_buffer.address + raygen_size, handle_stride, miss_size};
+  vk::StridedDeviceAddressRegionKHR hit_region{
+      sbt_buffer.address + raygen_size + miss_size, hit_size, hit_size};
+
+  auto camera_ubo = createBuffer(context, sizeof(CameraUbo),
+                                 vk::BufferUsageFlagBits::eUniformBuffer,
+                                 vk::MemoryPropertyFlagBits::eHostVisible |
+                                     vk::MemoryPropertyFlagBits::eHostCoherent);
+
+  auto skybox_image = load_skybox_image(context, skybox_path);
+  auto skybox_sampler = context.device->createSamplerUnique(
+      vk::SamplerCreateInfo()
+          .setMagFilter(vk::Filter::eLinear)
+          .setMinFilter(vk::Filter::eLinear)
+          .setAddressModeU(vk::SamplerAddressMode::eRepeat)
+          .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
+          .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
+          .setMaxLod(vk::LodClampNone));
+
+  auto tex_infos = std::vector<vk::DescriptorImageInfo>();
+  tex_infos.reserve(tex_count);
+  for (auto& tex : scene.textures) {
+    tex_infos.emplace_back(
+        vk::DescriptorImageInfo()
+            .setSampler(context.linear_sampler.get())
+            .setImageView(tex.view.get())
+            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal));
+  }
+
+  if (tex_infos.empty()) {
+    tex_infos.push_back({skybox_sampler.get(), skybox_image.view.get(),
+                         vk::ImageLayout::eShaderReadOnlyOptimal});
+  }
+
+  vk::WriteDescriptorSetAccelerationStructureKHR tlas_info{};
+  tlas_info.setAccelerationStructures(scene.tlas_handle.get());
+
+  auto storage_image_info = vk::DescriptorImageInfo()
+                                .setImageLayout(vk::ImageLayout::eGeneral)
+                                .setImageView(storage_image.view.get());
+
+  auto display_image_info = vk::DescriptorImageInfo()
+                                .setImageLayout(vk::ImageLayout::eGeneral)
+                                .setImageView(display_image.view.get());
+
+  vk::DescriptorBufferInfo camera_info{camera_ubo.handle.get(), 0,
+                                       sizeof(CameraUbo)};
+  vk::DescriptorBufferInfo mesh_info{scene.mesh_info_buffer.handle.get(), 0,
+                                     vk::WholeSize};
+  vk::DescriptorBufferInfo mat_info{scene.material_buffer.handle.get(), 0,
+                                    vk::WholeSize};
+  vk::DescriptorBufferInfo light_buf_info{
+      scene.light_triangle_buffer.handle.get(), 0, vk::WholeSize};
+
+  auto skybox_info =
+      vk::DescriptorImageInfo()
+          .setSampler(skybox_sampler.get())
+          .setImageView(skybox_image.view.get())
+          .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
+
+  std::array<vk::WriteDescriptorSet, 9> writes = {
+      {vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(0)
+           .setDescriptorType(vk::DescriptorType::eAccelerationStructureKHR)
+           .setDescriptorCount(1)
+           .setPNext(&tlas_info),
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(1)
+           .setDescriptorType(vk::DescriptorType::eStorageImage)
+           .setDescriptorCount(1)
+           .setPImageInfo(&storage_image_info),
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(2)
+           .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+           .setDescriptorCount(1)
+           .setPBufferInfo(&camera_info),
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(3)
+           .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+           .setDescriptorCount(1)
+           .setPBufferInfo(&mesh_info),
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(4)
+           .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+           .setDescriptorCount(1)
+           .setPBufferInfo(&mat_info),
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(5)
+           .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+           .setDescriptorCount(1)
+           .setPBufferInfo(&light_buf_info),
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(6)
+           .setDescriptorType(vk::DescriptorType::eStorageImage)
+           .setDescriptorCount(1)
+           .setPImageInfo(&display_image_info),
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(7)
+           .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+           .setDescriptorCount(1)
+           .setPImageInfo(&skybox_info),
+       vk::WriteDescriptorSet{}
+           .setDstSet(desc_set)
+           .setDstBinding(8)
+           .setImageInfo(tex_infos)
+           .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+           .setDescriptorCount(tex_count)}};
+
+  context.device->updateDescriptorSets(writes, {});
+
+  return RtPipeline{
+      .rt_pipeline = std::move(rt_pipeline),
+      .tonemap_pipeline = std::move(tonemap_pipeline),
+      .layout = std::move(layout),
+      .desc_layout = std::move(desc_layout),
+      .desc_pool = std::move(desc_pool),
+      .desc_set = desc_set,
+      .raygen_region = raygen_region,
+      .miss_region = miss_region,
+      .hit_region = hit_region,
+      .callable_region = {},
+      .storage_image = std::move(storage_image),
+      .sbt_buffer = std::move(sbt_buffer),
+      .camera_ubo = std::move(camera_ubo),
+      .display_image = std::move(display_image),
+      .skybox_image = std::move(skybox_image),
+      .skybox_sampler = std::move(skybox_sampler),
+  };
+}
+
+bool reload_pipeline(const Context& context, RtPipeline& p) {
+  auto raygen_module = compile_slang(context, "raygen", "main");
+  auto miss_module = compile_slang(context, "miss", "main");
+  auto shadow_module = compile_slang(context, "shadow_miss", "main");
+  auto closesthit_module = compile_slang(context, "closesthit", "main");
+  auto tonemap_module = compile_slang(context, "tonemap", "main");
+
+  if (!raygen_module || !miss_module || !shadow_module || !closesthit_module ||
+      !tonemap_module) {
+    fprintf(stderr, "[slang]: Shader reload aborted, keeping old pipeline\n");
+    return false;
+  }
+
+  // clang-format off
+  std::array<vk::PipelineShaderStageCreateInfo, 4> rt_stages = {{
+      {{}, vk::ShaderStageFlagBits::eRaygenKHR,     raygen_module->get(),     "main"},
+      {{}, vk::ShaderStageFlagBits::eMissKHR,       miss_module->get(),       "main"},
+      {{}, vk::ShaderStageFlagBits::eMissKHR,       shadow_module->get(),     "main"},
+      {{}, vk::ShaderStageFlagBits::eClosestHitKHR, closesthit_module->get(), "main"},
+  }};
+  // clang-format on
+
+  std::array<vk::RayTracingShaderGroupCreateInfoKHR, 4> groups = {{
+      vk::RayTracingShaderGroupCreateInfoKHR{}
+          .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
+          .setGeneralShader(0)
+          .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+          .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+          .setIntersectionShader(VK_SHADER_UNUSED_KHR),
+      vk::RayTracingShaderGroupCreateInfoKHR{}
+          .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
+          .setGeneralShader(1)
+          .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+          .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+          .setIntersectionShader(VK_SHADER_UNUSED_KHR),
+      vk::RayTracingShaderGroupCreateInfoKHR{}
+          .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
+          .setGeneralShader(2)
+          .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+          .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+          .setIntersectionShader(VK_SHADER_UNUSED_KHR),
+      vk::RayTracingShaderGroupCreateInfoKHR{}
+          .setType(vk::RayTracingShaderGroupTypeKHR::eTrianglesHitGroup)
+          .setGeneralShader(VK_SHADER_UNUSED_KHR)
+          .setClosestHitShader(3)
+          .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+          .setIntersectionShader(VK_SHADER_UNUSED_KHR),
+  }};
+
+  auto rt_pipeline_result = context.device->createRayTracingPipelineKHRUnique(
+      {}, {},
+      vk::RayTracingPipelineCreateInfoKHR{}
+          .setStages(rt_stages)
+          .setGroups(groups)
+          .setMaxPipelineRayRecursionDepth(2)
+          .setLayout(p.layout.get()));
+
+  if (rt_pipeline_result.result != vk::Result::eSuccess) {
+    fprintf(stderr, "[vulkan] Error: Failed to create ray tracing pipeline\n");
+    std::abort();
+  }
+
+  auto tonemap_pipeline_result = context.device->createComputePipelineUnique(
+      vk::PipelineCache(),
+      vk::ComputePipelineCreateInfo()
+          .setStage(vk::PipelineShaderStageCreateInfo()
+                        .setStage(vk::ShaderStageFlagBits::eCompute)
+                        .setModule(tonemap_module->get())
+                        .setPName("main"))
+          .setLayout(p.layout.get()));
+
+  if (tonemap_pipeline_result.result != vk::Result::eSuccess) {
+    fprintf(stderr, "[vulkan] Error: Failed to create tonemap pipeline\n");
+    std::abort();
+  }
+
+  p.rt_pipeline = std::move(rt_pipeline_result.value);
+  p.tonemap_pipeline = std::move(tonemap_pipeline_result.value);
+
+  auto rt_props =
+      context.physical_device
+          .getProperties2<vk::PhysicalDeviceProperties2,
+                          vk::PhysicalDeviceRayTracingPipelinePropertiesKHR>()
+          .get<vk::PhysicalDeviceRayTracingPipelinePropertiesKHR>();
+
+  uint32_t handle_size = rt_props.shaderGroupHandleSize;
+  uint32_t handle_align = rt_props.shaderGroupHandleAlignment;
+  uint32_t base_align = rt_props.shaderGroupBaseAlignment;
+
+  auto align_up = [](uint32_t val, uint32_t align) {
+    return (val + align - 1) & ~(align - 1);
+  };
+
+  uint32_t handle_stride = align_up(handle_size, handle_align);
+  uint32_t raygen_size = align_up(handle_stride, base_align);
+  uint32_t miss_size = align_up(handle_stride * 2, base_align);
+  uint32_t hit_size = align_up(handle_stride, base_align);
+  uint32_t total_size = raygen_size + miss_size + hit_size;
+
+  p.sbt_buffer = createBuffer(context, total_size,
+                              vk::BufferUsageFlagBits::eShaderBindingTableKHR |
+                                  vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                              vk::MemoryPropertyFlagBits::eHostVisible |
+                                  vk::MemoryPropertyFlagBits::eHostCoherent);
+
+  auto handles = context.device->getRayTracingShaderGroupHandlesKHR<uint8_t>(
+      p.rt_pipeline.get(), 0, 4, 4 * handle_size);
+
+  {
+    auto* sbt = (uint8_t*)context.device->mapMemory(p.sbt_buffer.memory.get(),
+                                                    0, total_size);
+    memcpy(sbt, handles.data() + 0 * handle_size, handle_size);
+    memcpy(sbt + raygen_size, handles.data() + 1 * handle_size, handle_size);
+    memcpy(sbt + raygen_size + handle_stride, handles.data() + 2 * handle_size,
+           handle_size);
+    memcpy(sbt + raygen_size + miss_size, handles.data() + 3 * handle_size,
+           handle_size);
+    context.device->unmapMemory(p.sbt_buffer.memory.get());
+  }
+
+  p.raygen_region = vk::StridedDeviceAddressRegionKHR{}
+                        .setDeviceAddress(p.sbt_buffer.address)
+                        .setStride(raygen_size)
+                        .setSize(raygen_size);
+  p.miss_region = vk::StridedDeviceAddressRegionKHR{}
+                      .setDeviceAddress(p.sbt_buffer.address + raygen_size)
+                      .setStride(handle_stride)
+                      .setSize(miss_size);
+  p.hit_region =
+      vk::StridedDeviceAddressRegionKHR{}
+          .setDeviceAddress(p.sbt_buffer.address + raygen_size + miss_size)
+          .setStride(hit_size)
+          .setSize(hit_size);
+  return true;
+}
+
+void update_camera(const Context& ctx, RtPipeline& p, const CameraUbo& cam) {
+  void* mapped =
+      ctx.device->mapMemory(p.camera_ubo.memory.get(), 0, sizeof(CameraUbo));
+  memcpy(mapped, &cam, sizeof(CameraUbo));
+  ctx.device->unmapMemory(p.camera_ubo.memory.get());
+}

@@ -1,18 +1,13 @@
+#include <glob.h>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
+#include <sys/stat.h>
 #include <utils.h>
 #include <vulkan/vulkan_core.h>
 
-#include "scene.h"
-#include "vulkan/vulkan.hpp"
-
-#define TINYOBJLOADER_IMPLEMENTATION
-#include <glob.h>
-#include <sys/stat.h>
-#include <tinyobjloader/tiny_obj_loader.h>
-
 #include <cstdint>
+#include <glm/gtc/type_ptr.hpp>
 #include <vulkan/vulkan.hpp>
 
 #include "camera.h"
@@ -20,6 +15,7 @@
 #include "context.h"
 #include "ini.h"
 #include "rt_pipeline.h"
+#include "scene.h"
 #include "swapchain.h"
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE

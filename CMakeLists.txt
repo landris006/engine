@@ -28,8 +28,22 @@ target_link_libraries(imgui PRIVATE Vulkan::Vulkan glfw)
 
 add_subdirectory(external/fastgltf)
 
+set(SHARED_SOURCES
+    src/stb_impl.cpp
+    src/context.cpp
+    src/utils.cpp
+    src/dds.cpp
+    src/ini.cpp
+    src/scene.cpp
+    src/rt_pipeline.cpp
+)
+
 # Main Executable
-add_executable(engine src/main.cpp)
+add_executable(engine
+    src/main.cpp
+    src/swapchain.cpp
+    ${SHARED_SOURCES}
+)
 
 target_include_directories(engine PRIVATE src external ${SLANG_INCLUDE_DIR})
 
@@ -49,8 +63,17 @@ target_compile_definitions(engine PRIVATE
   VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
 )
 
+target_precompile_headers(engine PRIVATE
+    <vulkan/vulkan.hpp>
+    <glm/glm.hpp>
+    <fastgltf/core.hpp>
+)
+
 # Headless renderer
-add_executable(engine_headless src/headless.cpp)
+add_executable(engine_headless
+    src/headless.cpp
+    ${SHARED_SOURCES}
+)
 
 target_include_directories(engine_headless PRIVATE src external ${SLANG_INCLUDE_DIR})
 
@@ -67,4 +90,10 @@ target_compile_definitions(engine_headless PRIVATE
     HEADLESS
     VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
     $<$<CONFIG:Debug>:DEBUG>
+)
+
+target_precompile_headers(engine_headless PRIVATE
+    <vulkan/vulkan.hpp>
+    <glm/glm.hpp>
+    <fastgltf/core.hpp>
 )

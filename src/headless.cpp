@@ -1,5 +1,4 @@
 #include "config.h"
-#define TINYOBJLOADER_IMPLEMENTATION
 #include "camera.h"
 #include "context.h"
 #include "ini.h"
