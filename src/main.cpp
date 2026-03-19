@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <glm/detail/qualifier.hpp>
+#include <glm/gtc/constants.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <vulkan/vulkan.hpp>
 
@@ -173,6 +174,18 @@ int main(int argc, char** argv) {
       ImGui::Text("Avg all: %6.2f ms  %5.0f fps", avg_all, 1000.0f / avg_all);
       ImGui::PlotLines("##frametimes", frame_times, FRAME_TIME_HISTORY,
                        frame_time_idx, nullptr, 0.0f, 50.0f, ImVec2(0, 60));
+
+      ImGui::Text("Camera");
+      auto camera_controls = {
+          ImGui::InputFloat3("Position", glm::value_ptr(cam.position)),
+          ImGui::SliderFloat("Yaw", &cam.yaw, 0.0f, 2 * glm::pi<float>()),
+          ImGui::SliderFloat("Pitch", &cam.pitch, -glm::half_pi<float>() + 0.1f,
+                             glm::half_pi<float>() - 0.1f),
+          ImGui::SliderFloat("FoV", &cam.fov, 0.0f, 180.0f),
+      };
+      if (std::ranges::any_of(camera_controls, std::identity())) {
+        pc.sample_count = 0;
+      }
 
       ImGui::Text("Light Ray");
       auto light_controls = {
