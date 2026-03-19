@@ -6,7 +6,9 @@
 #include <utils.h>
 #include <vulkan/vulkan_core.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <glm/detail/qualifier.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <vulkan/vulkan.hpp>
 
@@ -128,6 +130,8 @@ int main(int argc, char** argv) {
     float avg_all = 0.0f;
     uint32_t avg_all_count = 0;
 
+    Controls controls;
+
     PushConstants pc = {
         .sample_count = 0,
         .max_bounces = 4,
@@ -170,10 +174,25 @@ int main(int argc, char** argv) {
       ImGui::PlotLines("##frametimes", frame_times, FRAME_TIME_HISTORY,
                        frame_time_idx, nullptr, 0.0f, 50.0f, ImVec2(0, 60));
 
-      if (ImGui::SliderFloat3("Direction", glm::value_ptr(pc.dir_light), -1.0f,
-                              1.0f)) {
+      ImGui::Text("Light Ray");
+      auto light_controls = {
+          ImGui::SliderFloat("Azimuth", &controls.light_ray_azimuth, 0.0f,
+                             360.0),
+          ImGui::SliderFloat("Elevation", &controls.light_ray_elevation, 0.0,
+                             90.0),
+          ImGui::ColorEdit3("Color", glm::value_ptr(controls.light_ray_color)),
+          ImGui::SliderFloat("Intensity", &controls.light_ray_intensity, 0.0f,
+                             10.0f),
+      };
+      if (std::ranges::any_of(light_controls, std::identity())) {
         pc.sample_count = 0;
       }
+
+      pc.dir_light = get_light_ray(glm::radians(controls.light_ray_azimuth),
+                                   glm::radians(controls.light_ray_elevation));
+      pc.dir_light_radiance =
+          controls.light_ray_intensity * controls.light_ray_color;
+
       ImGui::End();
 
       ImGui::Render();

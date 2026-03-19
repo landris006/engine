@@ -197,7 +197,7 @@ void main() {
       sr.TMax      = 1e9;
       TraceRay(tlas, 0x0Cu, 0xFF, 0, 1, 1, sr, sp);
       if (!sp.occluded) {
-        float3 light_radiance = float3(1.0);
+        float3 light_radiance = push_constants.dir_light_radiance;
 
         float3 bsdf = eval_bsdf(payload.albedo, payload.metallic, payload.roughness,
                                 V, L, payload.normal);

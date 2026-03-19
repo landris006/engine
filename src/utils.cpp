@@ -75,3 +75,12 @@ auto load_texture(const Context& ctx, const void* pixels, int w, int h,
 
   return img;
 }
+
+// Unit vector pointing to the light
+auto get_light_ray(float azimuth, float elevation) -> glm::vec3 {
+  float x = glm::cos(elevation) * glm::sin(azimuth);
+  float y = glm::sin(elevation);
+  float z = glm::cos(elevation) * glm::cos(azimuth);
+
+  return glm::vec3(x, y, z);
+}

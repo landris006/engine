@@ -55,6 +55,7 @@ struct PushConstants {
   uint32_t max_bounces;
   uint32_t light_count;
   float3 dir_light;
+  float3 dir_light_radiance;
   float time;
 };
 
@@ -68,5 +69,5 @@ static_assert(sizeof(Material) == 64);
 static_assert(sizeof(MeshInfo) == 24);
 static_assert(sizeof(CameraUbo) == 64);
 static_assert(sizeof(LightTriangle) == 56);
-static_assert(sizeof(PushConstants) == 28);
+static_assert(sizeof(PushConstants) == 40);
 #endif
